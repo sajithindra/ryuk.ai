@@ -1,21 +1,35 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
-from core.state import frame_queue
+from core.state import cache, new_stream_signals
 
 app = FastAPI()
 
 @app.websocket("/ws/stream")
 async def websocket_camera_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("Camera client connected to /ws/stream")
+    client_host = websocket.client.host
+    client_port = websocket.client.port
+    client_id = f"{client_host}:{client_port}"
+    
+    print(f"Camera client {client_id} connected via Redis Bridge.")
+    
+    # Register stream in Redis Set
+    cache.sadd("registry:active_streams", client_id)
+    # Signal UI (Legacy compatibility for current UI polling)
+    new_stream_signals.append(client_id)
+        
     try:
         while True:
             data = await websocket.receive_bytes()
-            frame_queue.append(data)
+            # PUSH TO REDIS with 2s expiration to prevent memory bloat
+            frame_key = f"stream:{client_id}:frame"
+            cache.set(frame_key, data, ex=2)
     except WebSocketDisconnect:
-        print("Camera client disconnected")
-    except Exception as e:
-        print(f"Error reading camera websocket: {e}")
+        print(f"Camera client {client_id} disconnected.")
+    finally:
+        # Cleanup Registry
+        cache.srem("registry:active_streams", client_id)
+        cache.delete(f"stream:{client_id}:frame")
 
 @app.get("/")
 def read_root():

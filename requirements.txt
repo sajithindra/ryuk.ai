@@ -3,3 +3,7 @@ uvicorn
 websockets
 opencv-python
 numpy
+PyQt6
+qdarktheme
+onnxruntime-gpu
+insightface
