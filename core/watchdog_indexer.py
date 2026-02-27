@@ -7,6 +7,8 @@ import base64
 from core.ai_processor import face_app # Kept this as it's used later
 from datetime import datetime, timedelta
 from core.database import get_sync_db
+import json
+from core.state import cache # Standard local Redis connection from state.py
 
 # MongoDB Handles (Sync for FAISS management)
 db = get_sync_db()
@@ -214,9 +216,21 @@ def log_activity(aadhar: str, client_id: str):
     """Records a timestamped activity log for a known person with camera location metadata."""
     if activity_logs_col is None: return
     
-    # Get camera locations
-    cam = cameras_col.find_one({"client_id": client_id})
-    locations = cam.get("locations", ["Unknown", "Unknown"]) if cam else ["Unknown", "Unknown"]
+    # [OPTIMIZATION] 1. Check Redis Cooldown (2-Minute Threshold per Face per Camera)
+    cooldown_key = f"cooldown:log:{aadhar}:{client_id}"
+    if cache.exists(cooldown_key):
+        return # Skip writing duplicate log to MongoDB if they were just seen here
+        
+    # [OPTIMIZATION] 2. Cache Camera Location Metadata (1-Hour TTL)
+    loc_cache_key = f"cache:cam_loc:{client_id}"
+    cached_locs = cache.get(loc_cache_key)
+    
+    if cached_locs:
+        locations = json.loads(cached_locs)
+    else:
+        cam = cameras_col.find_one({"client_id": client_id})
+        locations = cam.get("locations", ["Unknown", "Unknown"]) if cam else ["Unknown", "Unknown"]
+        cache.setex(loc_cache_key, 3600, json.dumps(locations)) # Cache for 1 hour
     
     log_entry = {
         "aadhar": aadhar,
@@ -228,6 +242,8 @@ def log_activity(aadhar: str, client_id: str):
     
     try:
         activity_logs_col.insert_one(log_entry)
+        # Lock this person on this camera from logging again for 2 minutes (120 seconds)
+        cache.setex(cooldown_key, 120, "1")
         print(f"Watchdog: Logged activity for {aadhar} at {client_id} ({locations})")
     except Exception as e:
         print(f"Watchdog: Logging failed - {e}")
