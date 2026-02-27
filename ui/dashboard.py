@@ -14,15 +14,15 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QFrame, QStackedWidget,
     QLineEdit, QFileDialog, QMessageBox, QSpacerItem, 
     QSizePolicy, QApplication, QScrollArea, QGridLayout,
-    QComboBox
+    QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QGraphicsDropShadowEffect
 )
-from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QPen, QFont, QBrush
-from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QPen, QFont, QBrush, QIcon, QTextDocument
+from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QByteArray, QThread
+from PyQt6.QtPrintSupport import QPrinter
 
 import core.watchdog_indexer as watchdog
 from core.state import new_stream_signals, cache
 from components.video_worker import VideoProcessor
-from PyQt6.QtCore import QThread, pyqtSignal
 
 class CameraCard(QFrame):
     """A reusable UI card for a single camera stream."""
@@ -280,7 +280,18 @@ class ActivityReportDialog(QMainWindow):
         self.btn_generate.setStyleSheet("background-color: rgba(0, 229, 255, 0.15); color: #00E5FF; font-weight: bold; padding: 12px; border-radius: 12px; border: 1px solid rgba(0, 229, 255, 0.3);")
         self.btn_generate.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_generate.clicked.connect(self.generate_report)
-        right_col.addWidget(self.btn_generate)
+        
+        self.btn_download = QPushButton("DOWNLOAD PDF")
+        self.btn_download.setStyleSheet("background-color: rgba(0, 230, 118, 0.15); color: #00E676; font-weight: bold; padding: 12px; border-radius: 12px; border: 1px solid rgba(0, 230, 118, 0.3);")
+        self.btn_download.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_download.clicked.connect(self.download_pdf)
+        self.btn_download.hide() # Hidden until report exists
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.btn_generate)
+        btn_layout.addWidget(self.btn_download)
+        
+        right_col.addLayout(btn_layout)
         
         self.report_view = QTextEdit()
         self.report_view.setReadOnly(True)
@@ -352,11 +363,42 @@ class ActivityReportDialog(QMainWindow):
     def on_finished(self):
         self.btn_generate.setText("GENERATE DOSSIER")
         self.btn_generate.setDisabled(False)
+        self.btn_download.show()
         
     def on_error(self, error):
         self.report_view.append(f"\n[!] ERROR: {error}")
         self.btn_generate.setText("GENERATE DOSSIER")
         self.btn_generate.setDisabled(False)
+        self.btn_download.hide()
+        
+    def download_pdf(self):
+        """Renders the current markdown dossier out to a PDF file."""
+        import os
+        from datetime import datetime
+        name_safestr = self.meta.get('name', 'unknown').lower().replace(' ', '_')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"ryuk_dossier_{name_safestr}_{timestamp}.pdf"
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Save Intelligence Dossier", 
+            os.path.join(os.path.expanduser("~"), "Downloads", default_filename),
+            "PDF Files (*.pdf)"
+        )
+        
+        if file_path:
+            try:
+                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+                printer.setOutputFileName(file_path)
+                printer.setPageMargins(15, 15, 15, 15, QPrinter.Unit.Millimeter)
+                
+                # The easiest way to print is to let the QTextEdit paint to the printer
+                self.report_view.document().print(printer)
+                
+                QMessageBox.information(self, "Export Complete", f"Dossier successfully saved to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Failed", f"Failed to generate PDF:\n{str(e)}")
 
 class EditProfileDialog(QMainWindow):
     """A sleek overlay to edit existing person intelligence."""
