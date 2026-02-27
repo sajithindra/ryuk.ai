@@ -16,8 +16,8 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QApplication, QScrollArea, QGridLayout,
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QGraphicsDropShadowEffect
 )
-from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QPen, QFont, QBrush, QIcon, QTextDocument
-from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QByteArray, QThread
+from PyQt6.QtGui import QPixmap, QImage, QColor, QPainter, QPen, QFont, QBrush, QIcon, QTextDocument, QPageLayout
+from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QByteArray, QThread, QMarginsF
 from PyQt6.QtPrintSupport import QPrinter
 
 import core.watchdog_indexer as watchdog
@@ -316,22 +316,29 @@ class ActivityReportDialog(QMainWindow):
 
         for log in self.logs:
             row = QFrame()
-            row.setStyleSheet("background-color: rgba(255, 255, 255, 0.03); border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05); padding: 10px; margin-bottom: 2px;")
+            # Removed borders and background styling 
+            row.setStyleSheet("background-color: transparent; border: none; margin-bottom: 5px;")
             r_lay = QVBoxLayout(row)
+            r_lay.setContentsMargins(0, 0, 0, 0)
+            r_lay.setSpacing(2)
             
-            time_lbl = QLabel(log.get('date_str', 'Unknown Time'))
+            time_str = log.get('date_str', 'Unknown Time')
+            locs = log.get('locations', ["Unknown", "Unknown"])
+            cam_str = log.get('client_id', 'Unknown Device')
+            
+            time_lbl = QLabel(time_str)
             time_lbl.setStyleSheet("color: #00E5FF; font-weight: bold; font-size: 11px;")
             
-            locs = log.get('locations', ["Unknown", "Unknown"])
             loc_lbl = QLabel(f"📍 {locs[0]} ➔ {locs[1]}")
             loc_lbl.setStyleSheet("color: #FFFFFF; font-size: 12px; font-weight: 600;")
             
-            cam_lbl = QLabel(f"DEVICE ID: {log.get('client_id')}")
-            cam_lbl.setStyleSheet("color: #8A92A6; font-size: 9px; font-family: 'Ubuntu Mono';")
+            cam_lbl = QLabel(f"DEVICE ID: {cam_str}")
+            cam_lbl.setStyleSheet("color: #8A92A6; font-size: 10px; font-family: 'Ubuntu Mono';")
             
             r_lay.addWidget(time_lbl)
             r_lay.addWidget(loc_lbl)
             r_lay.addWidget(cam_lbl)
+            
             self.list_layout.addWidget(row)
 
     def generate_report(self):
@@ -391,7 +398,7 @@ class ActivityReportDialog(QMainWindow):
                 printer = QPrinter(QPrinter.PrinterMode.HighResolution)
                 printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
                 printer.setOutputFileName(file_path)
-                printer.setPageMargins(15, 15, 15, 15, QPrinter.Unit.Millimeter)
+                printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
                 
                 # The easiest way to print is to let the QTextEdit paint to the printer
                 self.report_view.document().print(printer)
