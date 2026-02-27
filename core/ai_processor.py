@@ -1,3 +1,8 @@
+import warnings
+# Suppress internal InsightFace/Skimage deprecation warnings for a cleaner terminal
+warnings.filterwarnings("ignore", category=FutureWarning, module="insightface")
+warnings.filterwarnings("ignore", category=FutureWarning, module="skimage")
+
 from insightface.app import FaceAnalysis
 
 print("Initializing InsightFace model...")
