@@ -21,7 +21,7 @@ from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve, py
 from PyQt6.QtPrintSupport import QPrinter
 
 import core.watchdog_indexer as watchdog
-from core.state import new_stream_signals, cache
+from core.state import new_stream_signals, cache, global_signals
 from components.video_worker import VideoProcessor
 
 class CameraCard(QFrame):
@@ -1128,7 +1128,7 @@ class DashboardWindow(QMainWindow):
             self.img_path_label.setText("No photo selected...")
             
             # CRITICAL: Broadcast system-wide signal to restart tracking on all live cameras immediately!
-            new_stream_signals.faiss_updated.emit()
+            global_signals.faiss_updated.emit()
             
         except Exception as e:
             QMessageBox.critical(self, "Enrollment Error", str(e))

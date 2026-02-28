@@ -1,5 +1,11 @@
 import redis
 from collections import deque
+from PyQt6.QtCore import QObject, pyqtSignal
+
+class GlobalSignals(QObject):
+    faiss_updated = pyqtSignal()
+
+global_signals = GlobalSignals()
 
 # Initialize Redis client (standard local connection)
 cache = redis.Redis(host='localhost', port=6379, db=0)

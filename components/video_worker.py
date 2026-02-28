@@ -36,8 +36,8 @@ class VideoProcessor(QThread):
         self.last_faces = [] # Cache bounding boxes/metadata for skipped frames
         
         # Connect global updates to immediately flush recognition cache
-        from core.state import new_stream_signals
-        new_stream_signals.faiss_updated.connect(self.reload_index)
+        from core.state import global_signals
+        global_signals.faiss_updated.connect(self.reload_index)
 
     def reload_index(self):
         """Forces the worker to re-read the global FAISS memory after an enrollment."""
