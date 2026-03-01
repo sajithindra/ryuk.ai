@@ -73,9 +73,9 @@ class DashboardWindow(QMainWindow):
     All form/list logic is delegated to view sub-components.
     """
 
-    def __init__(self):
+    def __init__(self, ip_address=None):
         super().__init__()
-        self.ip_address = _get_local_ip()
+        self.ip_address = ip_address or _get_local_ip()
         self.setWindowTitle("Ryuk AI — Command Center")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
 
@@ -427,15 +427,17 @@ class DashboardWindow(QMainWindow):
         redis_ok = mongo_ok = False
         try:
             cache.ping(); redis_ok = True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Health Check: Redis Error - {e}")
         try:
             from core.database import get_sync_db
             db = get_sync_db()
             if db:
                 db.command("ping"); mongo_ok = True
-        except Exception:
-            pass
+            else:
+                print("Health Check: MongoDB handle is None")
+        except Exception as e:
+            print(f"Health Check: MongoDB Error - {e}")
 
         self.health_indicator.update_status(redis_ok, mongo_ok)
         ok, err = "#00E5FF", "#FF5370"

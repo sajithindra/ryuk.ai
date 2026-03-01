@@ -24,19 +24,24 @@ from config import (
 
 class FaceTrack:
     """State container for a single tracked face."""
-    __slots__ = ("track_id", "centroid", "last_seen", "embedding_history", "id_cache")
+    __slots__ = ("track_id", "centroid", "last_seen", "embedding_history", "id_cache", "smoothed_bbox")
 
-    def __init__(self, track_id: int, centroid: np.ndarray, embedding: np.ndarray):
+    def __init__(self, track_id: int, centroid: np.ndarray, embedding: np.ndarray, bbox: np.ndarray):
         self.track_id          = track_id
         self.centroid          = centroid
         self.last_seen         = time.time()
         self.embedding_history = deque([embedding], maxlen=FACE_TRACK_HISTORY)
         self.id_cache          = None   # last recognised identity dict
+        self.smoothed_bbox     = bbox.astype(float)
 
-    def update(self, centroid: np.ndarray, embedding: np.ndarray):
+    def update(self, centroid: np.ndarray, embedding: np.ndarray, bbox: np.ndarray):
         self.centroid  = centroid
         self.last_seen = time.time()
         self.embedding_history.append(embedding)
+        
+        # Exponential Moving Average for bbox smoothing
+        alpha = 0.3
+        self.smoothed_bbox = alpha * bbox.astype(float) + (1.0 - alpha) * self.smoothed_bbox
 
     @property
     def avg_embedding(self) -> np.ndarray:
@@ -99,12 +104,12 @@ class FaceTracker:
 
             if matched_id is not None:
                 used_ids.add(matched_id)
-                self._tracks[matched_id].update(centroid, face.embedding)
+                self._tracks[matched_id].update(centroid, face.embedding, bbox)
             else:
                 self._id_counter += 1
                 matched_id = self._id_counter
                 self._tracks[matched_id] = FaceTrack(
-                    matched_id, centroid, face.embedding
+                    matched_id, centroid, face.embedding, bbox
                 )
 
             parsed.append({
@@ -113,6 +118,7 @@ class FaceTracker:
                 "lmk2d":   lmk2d,
                 "lmk3d":   lmk3d,
                 "track":   self._tracks[matched_id],
+                "raw_face": face,
             })
 
         return parsed

@@ -1,5 +1,6 @@
 import warnings
 import os
+import numpy as np
 import onnxruntime as ort
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="insightface")
@@ -17,18 +18,6 @@ print(f"  ORT {ort.__version__} | Providers: {_available}")
 # Priority:  TensorrtExecutionProvider  ← fastest (Tensor Cores, fused ops)
 #            CUDAExecutionProvider       ← fallback for ops TRT doesn't support
 #            CPUExecutionProvider        ← last resort
-#
-# TRT options:
-#   trt_fp16_enable          — FP16 inference on RTX Tensor Cores (~2× throughput)
-#   trt_engine_cache_enable  — persist compiled engines; avoids rebuild on restart
-#   trt_max_workspace_size   — 3 GB scratch space for TRT optimizer
-#   trt_builder_optimization_level — 5 = maximum kernel fusion & layout tuning
-#
-# CUDA options (used for ops that fall back from TRT):
-#   gpu_mem_limit            — reserve 5 GB; leaves 3 GB for TRT + frame buffers
-#   cudnn_conv_algo_search   — EXHAUSTIVE: benchmark all cuDNN kernels, pick fastest
-#   do_copy_in_default_stream — pipeline H2D/D2H transfers with inference
-#   enable_cuda_graph        — wrap static sub-graphs into CUDA graphs (lowers overhead)
 # =============================================================================
 
 _TRT_CACHE = os.path.join(os.path.dirname(__file__), "..", "data", "trt_cache")
@@ -75,3 +64,13 @@ for model_name, model in face_app.models.items():
     print(f"  {status} {model.taskname}")
 
 print("InsightFace GPU initialization complete.")
+
+def warmup():
+    """Run a dummy inference to pre-allocate GPU memory and tune cuDNN kernels."""
+    print("GPU Warmup: Running dummy inference to eliminate initial lag...")
+    dummy_frame = np.zeros((640, 640, 3), dtype=np.uint8)
+    # The first call triggers TRT/cuDNN kernel selection and memory allocation
+    face_app.get(dummy_frame)
+    print("GPU Warmup: Complete. Application is ready for instant streaming.")
+
+warmup()

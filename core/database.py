@@ -2,9 +2,7 @@ import motor.motor_asyncio
 import pymongo
 import asyncio
 
-# MongoDB Connection Configuration
-MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "ryuk_ai"
+from config import MONGO_URI, DB_NAME
 
 # Async client for FastAPI / async routes
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)

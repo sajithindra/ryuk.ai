@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 
 from config import (
     DATA_DIR, IDENTITIES_PKL, FAISS_THRESHOLD,
-    LOG_COOLDOWN_S, CAM_LOC_TTL_S,
+    LOG_COOLDOWN_S, CAM_LOC_TTL_S, MAX_POSES_PER_ID,
+    AUTO_AUGMENT_MIN_SIM, AUTO_AUGMENT_TILT_DEG
 )
 from core.ai_processor import face_app
 from core.database import get_sync_db
@@ -44,6 +45,7 @@ class WatchdogIndexer:
         self._activity_col  = None
         self._connect_db()
         self._migrate_pickle()
+        self._migrate_embeddings_schema()
         self.update_index()
 
     # ------------------------------------------------------------------
@@ -85,6 +87,31 @@ class WatchdogIndexer:
         except Exception as e:
             print(f"MongoDB: Migration error: {e}")
 
+    def _migrate_embeddings_schema(self):
+        """Convert legacy single 'embedding' field to 'embeddings' list in MongoDB."""
+        if self._db is None:
+            return
+        
+        # Find all docs that have 'embedding' but NOT 'embeddings'
+        legacy_docs = list(self._profiles_col.find({
+            "embedding": {"$exists": True},
+            "embeddings": {"$exists": False}
+        }))
+        
+        if not legacy_docs:
+            return
+            
+        print(f"MongoDB: Found {len(legacy_docs)} legacy profiles. Converting to list schema…")
+        for doc in legacy_docs:
+            self._profiles_col.update_one(
+                {"_id": doc["_id"]},
+                {
+                    "$set": {"embeddings": [doc["embedding"]]},
+                    "$unset": {"embedding": ""}
+                }
+            )
+        print("MongoDB: Schema migration complete.")
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -108,16 +135,26 @@ class WatchdogIndexer:
 
         embeddings, mapping = [], []
         for doc in identities:
-            emb = np.frombuffer(doc["embedding"], dtype="float32")
-            mapping.append({
+            # Handle multi-embedding support
+            doc_embs = doc.get("embeddings", [])
+            person_meta = {
                 "aadhar":      doc.get("aadhar", "Unknown"),
                 "name":        doc.get("name", "Unknown"),
                 "threat_level": doc.get("threat_level", "Low"),
                 "phone":       doc.get("phone", "N/A"),
                 "address":     doc.get("address", "N/A"),
                 "photo_thumb": doc.get("photo_thumb", ""),
-            })
-            embeddings.append(emb)
+            }
+            
+            for emb_bytes in doc_embs:
+                emb = np.frombuffer(emb_bytes, dtype="float32")
+                embeddings.append(emb)
+                mapping.append(person_meta)
+
+        if not embeddings:
+            self._faiss_index = None
+            self._faiss_mapping = []
+            return
 
         mat = np.array(embeddings, dtype="float32")
         norms = np.linalg.norm(mat, axis=1, keepdims=True)
@@ -129,7 +166,7 @@ class WatchdogIndexer:
 
         self._faiss_index   = idx
         self._faiss_mapping = mapping
-        print(f"FAISS: Loaded {len(identities)} identities.")
+        print(f"FAISS: Loaded {len(embeddings)} vectors for {len(identities)} identities.")
 
     def enroll_face(self, image_path: str, aadhar: str, name: str,
                     threat_level: str = "Low", phone: str = "", address: str = ""):
@@ -168,16 +205,23 @@ class WatchdogIndexer:
 
         self._profiles_col.update_one(
             {"aadhar": aadhar},
-            {"$set": {
-                "name": name, "threat_level": threat_level,
-                "phone": phone, "address": address,
-                "embedding": embedding.tobytes(),
-                "photo_thumb": thumb_b64,
-            }},
+            {
+                "$set": {
+                    "name": name, "threat_level": threat_level,
+                    "phone": phone, "address": address,
+                    "photo_thumb": thumb_b64,
+                },
+                "$push": {
+                    "embeddings": {
+                        "$each": [embedding.tobytes()],
+                        "$slice": -MAX_POSES_PER_ID  # Keep last N poses
+                    }
+                }
+            },
             upsert=True,
         )
         self.update_index()
-        print(f"FAISS: Enrolled {name}.")
+        print(f"FAISS: Enrolled {name} (Augmented pose).")
 
     def recognize_face(self, embedding: np.ndarray,
                        threshold: float = FAISS_THRESHOLD) -> dict | None:
@@ -260,6 +304,25 @@ class WatchdogIndexer:
             print(f"Watchdog: Report failed — {e}")
             return []
 
+    def augment_identity(self, aadhar: str, embedding: np.ndarray):
+        """Add a new embedding (pose) to an existing profile in MongoDB."""
+        if self._db is None or not aadhar:
+            return
+            
+        self._profiles_col.update_one(
+            {"aadhar": aadhar},
+            {
+                "$push": {
+                    "embeddings": {
+                        "$each": [embedding.tobytes()],
+                        "$slice": -MAX_POSES_PER_ID
+                    }
+                }
+            }
+        )
+        self.update_index()
+        print(f"Watchdog: Augmented {aadhar} with new pose.")
+
     def register_camera_metadata(self, client_id: str, locations: list):
         if self._cameras_col is None:
             return
@@ -289,6 +352,7 @@ def delete_profile(aadhar):         _indexer.delete_profile(aadhar)
 def update_profile(aadhar, data):   _indexer.update_profile(aadhar, data)
 def get_activity_report(aadhar, limit=50, days_ago=None):
     return _indexer.get_activity_report(aadhar, limit, days_ago)
+def augment_identity(aadhar, emb): _indexer.augment_identity(aadhar, emb)
 def register_camera_metadata(cid, locs): _indexer.register_camera_metadata(cid, locs)
 
 # Legacy aliases kept for any direct attribute access

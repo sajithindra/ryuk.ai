@@ -27,7 +27,10 @@ IDENTITIES_PKL = os.path.join(DATA_DIR, "identities.pkl")
 # ---------------------------------------------------------------------------
 # Face recognition
 # ---------------------------------------------------------------------------
-FAISS_THRESHOLD       = 0.45   # Cosine similarity threshold for recognition
+FAISS_THRESHOLD       = 0.48   # Balanced for lighting/pose (0.60 was too strict)
+MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
+AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
+AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
 INFERENCE_THROTTLE    = 4      # Run heavy AI every Nth frame
 FACE_MAX_INACTIVE_S   = 2.0    # Seconds before a stale track is pruned
 FACE_TRACK_MAX_DIST   = 150    # Max centroid distance for track matching

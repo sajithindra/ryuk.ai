@@ -1,19 +1,8 @@
-"""
-components/video_worker.py
-
-VideoProcessor reads frames from Redis, delegates face tracking to
-FaceTracker, runs recognition + alert logic, then emits QImage signals.
-
-Refactored: the 150-line run() mega-method is now decomposed across:
-  - FaceTracker   (components/face_tracker.py)  — track lifecycle
-  - _run_inference()  — AI + recognition + alerting
-  - _draw_frame()     — OpenCV overlay drawing
-  - run()             — thin orchestration loop
-"""
 import time
 import cv2
 import numpy as np
 import json
+import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui  import QImage
@@ -28,17 +17,20 @@ from config import (
     FACE_CACHE_TTL_S,
     ALERT_COOLDOWN_S,
     LOG_COOLDOWN_S,
+    FAISS_THRESHOLD,
+    AUTO_AUGMENT_MIN_SIM,
+    AUTO_AUGMENT_TILT_DEG,
 )
 
 
 class VideoProcessor(QThread):
     """
     Background QThread:
-      1. Pulls JPEG frames from Redis.
-      2. Decodes and preprocesses.
-      3. Every Nth frame: runs InsightFace + recognition + alert.
-      4. Draws overlays.
-      5. Emits QImage to the UI.
+      1. Pulls JPEG frames from Redis as fast as possible.
+      2. Decodes frames.
+      3. Dispatches inference tasks to a background thread (non-blocking).
+      4. Draws the LATEST available face results.
+      5. Emits to UI.
     """
     frame_ready      = pyqtSignal(QImage)
     stream_inactive  = pyqtSignal(str)   # emits client_id
@@ -49,9 +41,14 @@ class VideoProcessor(QThread):
         self.client_id       = client_id
         self.running         = True
         self.target_size     = (640, 480)
+        
         self._frame_count    = 0
-        self._last_faces:    list[dict] = []   # cached for throttled frames
+        self._last_faces:    list[dict] = []   
         self._tracker        = FaceTracker()
+        
+        # Async state
+        self._is_inf_running = False
+        self._inf_lock       = threading.Lock()
 
         from core.state import global_signals
         global_signals.faiss_updated.connect(self._on_faiss_updated)
@@ -68,13 +65,10 @@ class VideoProcessor(QThread):
         self.running = False
         self.wait()
 
-    # ------------------------------------------------------------------
-    # Qt slots
-    # ------------------------------------------------------------------
-
     def _on_faiss_updated(self):
         """Flush recognition cache when FAISS index is rebuilt."""
-        self._last_faces = []
+        with self._inf_lock:
+            self._last_faces = []
 
     # ------------------------------------------------------------------
     # Main loop
@@ -91,20 +85,32 @@ class VideoProcessor(QThread):
             if raw:
                 frame = self._decode_frame(raw)
                 if frame is None:
-                    self.msleep(10)
+                    self.msleep(5)
                     continue
 
                 last_frame_time = time.time()
                 if not is_active:
                     is_active = True
 
-                # Inference on every Nth frame
                 self._frame_count = (self._frame_count + 1) % 10_000
-                if self._frame_count % INFERENCE_THROTTLE == 0:
-                    self._tracker.prune_stale()
-                    self._last_faces = self._run_inference(frame)
+                
+                # Non-blocking inference trigger
+                if not self._is_inf_running and (self._frame_count % INFERENCE_THROTTLE == 0):
+                    self._is_inf_running = True
+                    # Launch inference in background thread
+                    t = threading.Thread(
+                        target=self._async_inf_worker, 
+                        args=(frame.copy(),), 
+                        daemon=True
+                    )
+                    t.start()
 
-                self._draw_frame(frame, self._last_faces)
+                # Always draw the LATEST known face bboxes
+                # This ensures the video never pauses for AI "thinking"
+                with self._inf_lock:
+                    faces_to_draw = list(self._last_faces)
+
+                self._draw_frame(frame, faces_to_draw)
                 self._emit_frame(frame)
 
             else:
@@ -113,30 +119,26 @@ class VideoProcessor(QThread):
                     self._tracker.clear()
                     self.stream_inactive.emit(self.client_id)
 
-            self.msleep(10)
+            self.msleep(5) # Higher frequency loop
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _decode_frame(raw: bytes) -> np.ndarray | None:
-        """Decode JPEG bytes, rotate and flip for correct orientation."""
+    def _async_inf_worker(self, frame: np.ndarray):
+        """Worker thread for AI + DB tasks."""
         try:
-            arr   = np.frombuffer(raw, np.uint8)
-            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if frame is None:
-                return None
-            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            frame = cv2.flip(frame, 1)
-            return frame
-        except Exception:
-            return None
+            results = self._run_inference(frame)
+            with self._inf_lock:
+                self._last_faces = results
+        except Exception as e:
+            print(f"VideoProcessor: Async Inference Error — {e}")
+        finally:
+            self._is_inf_running = False
+
+    # ------------------------------------------------------------------
+    # AI Logic (Runs in Background Thread)
+    # ------------------------------------------------------------------
 
     def _run_inference(self, frame: np.ndarray) -> list[dict]:
         """
-        Downscale → InsightFace → match tracks → recognise → alert.
-        Returns list of face dicts ready for drawing.
+        Runs heavy InsightFace, MongoDB, and Redis tasks.
         """
         h, w      = frame.shape[:2]
         scale     = min(MAX_INFERENCE_SIZE / w, MAX_INFERENCE_SIZE / h)
@@ -154,11 +156,17 @@ class VideoProcessor(QThread):
         for item in tracked:
             track    = item["track"]
             track_id = item["track_id"]
-            bbox     = item["bbox"]
+            raw_face = item["raw_face"]
+            
+            bbox     = track.smoothed_bbox.astype(int)
 
+            # Potential slow DB/Network call
             name, threat, meta = self._recognise(track, track_id)
 
-            # Activity log + alert
+            if meta and hasattr(raw_face, "pose"):
+                aadhar = meta.get("aadhar")
+                self._try_auto_augment(aadhar, raw_face)
+
             aadhr = meta.get("aadhar") if meta else None
             if aadhr:
                 self._try_log(aadhr)
@@ -169,10 +177,9 @@ class VideoProcessor(QThread):
                 "bbox":  bbox,
                 "name":  name,
                 "threat": threat,
-                "lmk2d": item["lmk2d"],
-                "lmk3d": item["lmk3d"],
             })
 
+        self._tracker.prune_stale()
         return parsed_faces
 
     def _recognise(self, track, track_id: int) -> tuple[str, str, dict | None]:
@@ -186,7 +193,7 @@ class VideoProcessor(QThread):
             meta   = json.loads(cached)
             return meta.get("name", "Unknown"), meta.get("threat_level", "Low"), meta
 
-        identity = watchdog.recognize_face(emb, threshold=0.45)
+        identity = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD)
         if identity:
             self.person_identified.emit(identity)
             cache_str.set(cache_key, json.dumps(identity), ex=int(FACE_CACHE_TTL_S))
@@ -195,14 +202,12 @@ class VideoProcessor(QThread):
         return "Unknown", "Low", None
 
     def _try_log(self, aadhar: str):
-        """Log activity if not in cooldown."""
         lock_key = f"log_lock:{aadhar}:{self.client_id}"
         if not cache_str.get(lock_key):
             watchdog.log_activity(aadhar, self.client_id)
             cache_str.set(lock_key, "1", ex=int(LOG_COOLDOWN_S))
 
     def _try_alert(self, name: str):
-        """Publish high-threat alert if not in cooldown."""
         lock_key = f"alert_lock:{name}:{self.client_id}"
         if not cache_str.get(lock_key):
             msg = json.dumps({
@@ -215,43 +220,39 @@ class VideoProcessor(QThread):
             cache.publish("security_alerts", msg)
             cache_str.set(lock_key, "1", ex=int(ALERT_COOLDOWN_S))
 
-    # ------------------------------------------------------------------
-    # Drawing
-    # ------------------------------------------------------------------
+    def _try_auto_augment(self, aadhar: str, face_obj):
+        pose = face_obj.pose # [yaw, pitch, roll]
+        if any(abs(angle) > AUTO_AUGMENT_TILT_DEG for angle in pose):
+            lock_key = f"aug_lock:{aadhar}"
+            if not cache_str.get(lock_key):
+                watchdog.augment_identity(aadhar, face_obj.embedding)
+                cache_str.set(lock_key, "1", ex=3600)
 
-    @staticmethod
-    def _draw_face_mesh(frame: np.ndarray,
-                        points: np.ndarray,
-                        color: tuple = (0, 255, 0)):
-        size  = frame.shape
-        rect  = (0, 0, size[1], size[0])
-        sub   = cv2.Subdiv2D(rect)
-        for p in points:
-            if 0 <= p[0] < size[1] and 0 <= p[1] < size[0]:
-                sub.insert((float(p[0]), float(p[1])))
-        for t in sub.getTriangleList():
-            pts = [(int(t[i]), int(t[i+1])) for i in range(0, 6, 2)]
-            if all(0 <= pt[0] < size[1] and 0 <= pt[1] < size[0] for pt in pts):
-                cv2.line(frame, pts[0], pts[1], color, 1, cv2.LINE_AA)
-                cv2.line(frame, pts[1], pts[2], color, 1, cv2.LINE_AA)
-                cv2.line(frame, pts[2], pts[0], color, 1, cv2.LINE_AA)
+    # ------------------------------------------------------------------
+    # Drawing & Transcoding
+    # ------------------------------------------------------------------
 
     def _draw_frame(self, frame: np.ndarray, faces: list[dict]):
         for pf in faces:
             bbox  = pf["bbox"]
             name  = pf["name"]
             threat = pf["threat"]
-            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]),
-                          (255, 0, 0), 1)
-            label_color = (0, 0, 255) if threat == "High" else (0, 255, 0)
-            cv2.putText(frame, f"{name.upper()} ({threat})",
-                        (bbox[0], bbox[1] - 15),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.7, label_color, 1)
-            mesh_pts = []
-            if pf["lmk2d"] is not None: mesh_pts.extend(pf["lmk2d"])
-            if pf["lmk3d"] is not None: mesh_pts.extend(pf["lmk3d"])
-            if mesh_pts:
-                self._draw_face_mesh(frame, np.array(mesh_pts))
+            
+            main_color   = (83, 83, 255) if threat == "High" else (200, 229, 0)
+            text_color   = (255, 255, 255)
+            
+            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_AA)
+            
+            label = f" {name.upper()} "
+            font = cv2.FONT_HERSHEY_DUPLEX
+            font_scale = 0.5
+            thickness = 1
+            (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
+            
+            lx, ly = bbox[0], bbox[1] - 10
+            cv2.rectangle(frame, (lx, ly - th - 5), (lx + tw, ly + 5), (15, 10, 8), -1)
+            cv2.rectangle(frame, (lx, ly - th - 5), (lx + tw, ly + 5), main_color, 1, cv2.LINE_AA)
+            cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, thickness, cv2.LINE_AA)
 
     def _emit_frame(self, frame: np.ndarray):
         h, w        = frame.shape[:2]
@@ -264,3 +265,15 @@ class VideoProcessor(QThread):
         sh, sw, sc  = rgb.shape
         qt_img = QImage(rgb.data, sw, sh, sc * sw, QImage.Format.Format_RGB888)
         self.frame_ready.emit(qt_img.copy())
+
+    @staticmethod
+    def _decode_frame(raw: bytes) -> np.ndarray | None:
+        try:
+            arr   = np.frombuffer(raw, np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None: return None
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            frame = cv2.flip(frame, 1)
+            return frame
+        except Exception:
+            return None
