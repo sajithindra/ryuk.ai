@@ -41,17 +41,14 @@ class RyukAgent:
         try:
             # -------------------------------------------------------------
             # As requested: "nothing from the watchdog whould go to the gemini only mongo db documentss no other data"
+            # Strip PyMongo ObjectId to make it JSON serializable safely.
+            # Using dict comprehension instead of deepcopy — much faster for large docs.
             # -------------------------------------------------------------
-            import copy
-            # Strip PyMongo ObjectId to make it JSON serializable safely
-            safe_meta = copy.deepcopy(profile_meta)
-            if '_id' in safe_meta: del safe_meta['_id']
-            
-            safe_logs = []
-            for l in logs:
-                safe_l = copy.deepcopy(l)
-                if '_id' in safe_l: del safe_l['_id']
-                safe_logs.append(safe_l)
+            safe_meta = {k: v for k, v in profile_meta.items() if k != '_id'}
+            safe_logs = [
+                {k: v for k, v in l.items() if k != '_id'}
+                for l in logs
+            ]
             
             # Construct the data payload using RAW MongoDB JSON exactly as stored.
             payload = f"TARGET METADATA (RAW MONGODB RECORD):\n{json.dumps(safe_meta, indent=2, default=str)}\n\n"

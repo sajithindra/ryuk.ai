@@ -6,6 +6,7 @@ import asyncio
 MONGO_URI = "mongodb://localhost:27017"
 DB_NAME = "ryuk_ai"
 
+# Async client for FastAPI / async routes
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 db = client[DB_NAME]
 
@@ -26,15 +27,28 @@ async def init_db():
     except Exception as e:
         print(f"MongoDB: Init error (Unreachable): {e}")
 
+# ---------------------------------------------------------------------------
+# Sync client singleton – reused across health checks and watchdog operations.
+# Creating a new MongoClient per call re-establishes a TCP connection each time.
+# ---------------------------------------------------------------------------
+_sync_client: pymongo.MongoClient | None = None
+
 def get_sync_db():
-    """Provides a synchronous handle with connection verification."""
+    """Returns a cached synchronous MongoDB database handle."""
+    global _sync_client
     try:
-        sync_client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
-        sync_client.admin.command('ping')
-        return sync_client[DB_NAME]
+        if _sync_client is None:
+            _sync_client = pymongo.MongoClient(
+                MONGO_URI,
+                serverSelectionTimeoutMS=2000,
+                connectTimeoutMS=2000,
+            )
+        _sync_client.admin.command('ping')
+        return _sync_client[DB_NAME]
     except Exception as e:
         print(f"MongoDB Sync Error: {e}")
+        _sync_client = None  # Force reconnect on next call
         return None
 
-# Run init in the background event loop if one is already running, 
+# Run init in the background event loop if one is already running,
 # or it will be called by the server startup.

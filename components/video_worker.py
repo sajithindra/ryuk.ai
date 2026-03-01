@@ -1,260 +1,266 @@
+"""
+components/video_worker.py
+
+VideoProcessor reads frames from Redis, delegates face tracking to
+FaceTracker, runs recognition + alert logic, then emits QImage signals.
+
+Refactored: the 150-line run() mega-method is now decomposed across:
+  - FaceTracker   (components/face_tracker.py)  — track lifecycle
+  - _run_inference()  — AI + recognition + alerting
+  - _draw_frame()     — OpenCV overlay drawing
+  - run()             — thin orchestration loop
+"""
 import time
 import cv2
 import numpy as np
+import json
 
 from PyQt6.QtCore import QThread, pyqtSignal
-from PyQt6.QtGui import QImage
+from PyQt6.QtGui  import QImage
 
-from core.state import cache
+from core.state    import cache, cache_str
 from core.ai_processor import face_app
 import core.watchdog_indexer as watchdog
-from collections import deque
-import json
-import hashlib
+from components.face_tracker import FaceTracker
+from config import (
+    INFERENCE_THROTTLE,
+    MAX_INFERENCE_SIZE,
+    FACE_CACHE_TTL_S,
+    ALERT_COOLDOWN_S,
+    LOG_COOLDOWN_S,
+)
+
 
 class VideoProcessor(QThread):
     """
-    Background Thread that reads from a specific client's Redis key, 
-    runs InsightFace detection, and emits processed frames to the GUI.
+    Background QThread:
+      1. Pulls JPEG frames from Redis.
+      2. Decodes and preprocesses.
+      3. Every Nth frame: runs InsightFace + recognition + alert.
+      4. Draws overlays.
+      5. Emits QImage to the UI.
     """
-    frame_ready = pyqtSignal(QImage)
-    stream_inactive = pyqtSignal(str) # Emits client_id
-    person_identified = pyqtSignal(dict) # Emits full metadata for sidebar
+    frame_ready      = pyqtSignal(QImage)
+    stream_inactive  = pyqtSignal(str)   # emits client_id
+    person_identified = pyqtSignal(dict)  # emits identity metadata
 
-    def __init__(self, client_id):
+    def __init__(self, client_id: str):
         super().__init__()
-        self.client_id = client_id
-        self.running = True
-        # Track storage: {track_id: {'history': deque, 'centroid': (x,y), 'last_seen': time}}
-        self.tracks = {}
-        self.track_id_counter = 0
-        self.target_size = (640, 480) 
-        
-        # Performance Tuning
-        self.frame_count = 0
-        self.inference_throttle = 4 # Run heavy AI every Nth frame
-        self.last_faces = [] # Cache bounding boxes/metadata for skipped frames
-        
-        # Connect global updates to immediately flush recognition cache
+        self.client_id       = client_id
+        self.running         = True
+        self.target_size     = (640, 480)
+        self._frame_count    = 0
+        self._last_faces:    list[dict] = []   # cached for throttled frames
+        self._tracker        = FaceTracker()
+
         from core.state import global_signals
-        global_signals.faiss_updated.connect(self.reload_index)
+        global_signals.faiss_updated.connect(self._on_faiss_updated)
 
-    def reload_index(self):
-        """Forces the worker to re-read the global FAISS memory after an enrollment."""
-        self.last_faces = []
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
 
-    def set_target_size(self, width, height):
+    def set_target_size(self, width: int, height: int):
         if width > 0 and height > 0:
             self.target_size = (width, height)
-
-    def draw_delaunay(self, img, points, color=(0, 255, 0)):
-        size = img.shape
-        rect = (0, 0, size[1], size[0])
-        subdiv = cv2.Subdiv2D(rect)
-        for p in points:
-            if 0 <= p[0] < size[1] and 0 <= p[1] < size[0]:
-                subdiv.insert((float(p[0]), float(p[1])))
-        triangleList = subdiv.getTriangleList()
-        for t in triangleList:
-            pt1 = (int(t[0]), int(t[1]))
-            pt2 = (int(t[2]), int(t[3]))
-            pt3 = (int(t[4]), int(t[5]))
-            if (0 <= pt1[0] < size[1] and 0 <= pt1[1] < size[0] and
-                0 <= pt2[0] < size[1] and 0 <= pt2[1] < size[0] and
-                0 <= pt3[0] < size[1] and 0 <= pt3[1] < size[0]):
-                cv2.line(img, pt1, pt2, color, 1, cv2.LINE_AA)
-                cv2.line(img, pt2, pt3, color, 1, cv2.LINE_AA)
-                cv2.line(img, pt3, pt1, color, 1, cv2.LINE_AA)
-
-    def run(self):
-        last_frame_time = 0
-        is_active = False
-        frame_key = f"stream:{self.client_id}:frame"
-
-        while self.running:
-            # PULL LATEST FRAME FROM REDIS
-            data = cache.get(frame_key)
-            
-            if data:
-                try:
-                    nparr = np.frombuffer(data, np.uint8)
-                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                except Exception:
-                    continue
-                
-                if frame is not None:
-                    last_frame_time = time.time()
-                    if not is_active:
-                        is_active = True
-                        
-                    # Fix orientation
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                    frame = cv2.flip(frame, 1)
-
-                    # -------------------------------------------------------------
-                    # PERFORMANCE OPTIMIZATION: INFERENCE THROTTLING & PRE-SCALING
-                    # -------------------------------------------------------------
-                    self.frame_count += 1
-                    now = time.time()
-                    self.tracks = {tid: t for tid, t in self.tracks.items() if now - t['last_seen'] < 2.0}
-
-                    if self.frame_count % self.inference_throttle == 0:
-                        # 1. DOWN-SCALE FOR INFERENCE to unblock CPU
-                        MAX_INFERENCE_SIZE = 480
-                        h, w = frame.shape[:2]
-                        inf_scale = min(MAX_INFERENCE_SIZE / w, MAX_INFERENCE_SIZE / h)
-                        if inf_scale < 1.0:
-                            inf_w, inf_h = int(w * inf_scale), int(h * inf_scale)
-                            inf_frame = cv2.resize(frame, (inf_w, inf_h), interpolation=cv2.INTER_AREA)
-                        else:
-                            inf_frame = frame
-                            inf_scale = 1.0 # 1:1 mapping
-
-                        # 2. RUN HEAVY INSIGHTFACE DETECTION
-                        faces = face_app.get(inf_frame)
-                        parsed_faces = []
-
-                        used_tracks = set()
-                        for face in faces:
-                            # MAP BOUNDING BOXES BACK TO ORIGINAL 1080p/720p RESOLUTION
-                            bbox = (face.bbox / inf_scale).astype(int)
-                            
-                            # MAP LANDMARKS BACK
-                            lmk2d = None
-                            if hasattr(face, 'landmark_2d_106') and face.landmark_2d_106 is not None:
-                                lmk2d = face.landmark_2d_106 / inf_scale
-                            lmk3d = None
-                            if hasattr(face, 'landmark_3d_68') and face.landmark_3d_68 is not None:
-                                lmk3d = face.landmark_3d_68[:, :2] / inf_scale
-
-                            f_centroid = np.array([(bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2])
-                            matched_id = None
-                            min_dist = 150 # slightly larger tracking radius due to frame skipping
-                            
-                            for tid, track in self.tracks.items():
-                                if tid in used_tracks: continue
-                                dist = np.linalg.norm(f_centroid - track['centroid'])
-                                if dist < min_dist:
-                                    min_dist = dist
-                                    matched_id = tid
-                            
-                            if matched_id is not None:
-                                used_tracks.add(matched_id)
-                                track = self.tracks[matched_id]
-                                track['centroid'] = f_centroid
-                                track['last_seen'] = now
-                                track['history'].append(face.embedding)
-                            else:
-                                self.track_id_counter += 1
-                                matched_id = self.track_id_counter
-                                self.tracks[matched_id] = {
-                                    'history': deque([face.embedding], maxlen=5),
-                                    'centroid': f_centroid,
-                                    'last_seen': now,
-                                    'id_cache': None 
-                                }
-                            
-                            # -- RECOGNITION WITH REDIS CACHING --
-                            track = self.tracks[matched_id]
-                            name = "Unknown"
-                            threat = "Low"
-                            meta = None
-                            
-                            emb_hash = hashlib.md5(face.embedding.tobytes()).hexdigest()
-                            cache_key = f"cache:face:{emb_hash}"
-                            
-                            cached_data = cache.get(cache_key)
-                            if cached_data:
-                                meta = json.loads(cached_data.decode('utf-8'))
-                                name = meta.get("name", "Unknown")
-                                threat = meta.get("threat_level", "Low")
-                            else:
-                                avg_emb = np.mean(track['history'], axis=0)
-                                identity = watchdog.recognize_face(avg_emb, threshold=0.45)
-                                if identity:
-                                    meta = identity 
-                                    name = identity.get("name", "Unknown")
-                                    threat = identity.get("threat_level", "Low")
-                                    self.person_identified.emit(identity)
-                                    cache.set(cache_key, json.dumps(identity), ex=15)
-                                    
-                            # -- ACTIVITY LOGGING & ALERT LOGIC --
-                            aadhar = meta.get('aadhar') if meta else None
-                            if aadhar:
-                                log_lock_key = f"log_lock:{aadhar}:{self.client_id}"
-                                if not cache.get(log_lock_key):
-                                    watchdog.log_activity(aadhar, self.client_id)
-                                    cache.set(log_lock_key, "1", ex=30) 
-
-                            if threat == "High":
-                                alert_msg = {
-                                    "type": "SECURITY_ALERT",
-                                    "message": f"High Security Alert: {name} is spotted in the camera {self.client_id}",
-                                    "name": name,
-                                    "source": self.client_id,
-                                    "timestamp": time.time()
-                                }
-                                alert_lock_key = f"alert_lock:{name}:{self.client_id}"
-                                if not cache.get(alert_lock_key):
-                                    cache.publish("security_alerts", json.dumps(alert_msg))
-                                    cache.set(alert_lock_key, "1", ex=10)
-                            
-                            parsed_faces.append({
-                                'bbox': bbox,
-                                'name': name,
-                                'threat': threat,
-                                'lmk2d': lmk2d,
-                                'lmk3d': lmk3d
-                            })
-                        
-                        # Cache these for the skipped frames
-                        self.last_faces = parsed_faces
-
-                    # -------------------------------------------------------------
-                    # DRAWING PHASE (Runs on EVERY UI frame using last known data)
-                    # -------------------------------------------------------------
-                    for pf in self.last_faces:
-                        bbox = pf['bbox']
-                        name = pf['name']
-                        threat = pf['threat']
-                        
-                        cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 0, 0), 1)
-                        label_color = (0, 0, 255) if threat == "High" else (0, 255, 0)
-                        cv2.putText(frame, f"{name.upper()} ({threat})", (bbox[0], bbox[1] - 15), 
-                                    cv2.FONT_HERSHEY_DUPLEX, 0.7, label_color, 1)
-
-                        mesh_points = []
-                        if pf['lmk2d'] is not None:
-                            mesh_points.extend(pf['lmk2d'])
-                        if pf['lmk3d'] is not None:
-                            mesh_points.extend(pf['lmk3d'])
-                        if mesh_points:
-                            self.draw_delaunay(frame, np.array(mesh_points), color=(0, 255, 0))
-
-                    # -------------------------------------------------------------
-                    # UI SCALE & EMIT (Downsize just for the dashboard view size)
-                    # -------------------------------------------------------------
-                    h, w = frame.shape[:2]
-                    target_w, target_h = self.target_size
-                    scale = min(target_w / w, target_h / h)
-                    nw, nh = int(w * scale), int(h * scale)
-                    if nw > 0 and nh > 0:
-                        scaled_frame = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA)
-                    else:
-                        scaled_frame = frame
-
-                    rgb_frame = cv2.cvtColor(scaled_frame, cv2.COLOR_BGR2RGB)
-                    sh, sw, sch = rgb_frame.shape
-                    # QImage creation from byte buffer
-                    qt_img = QImage(rgb_frame.data, sw, sh, sch * sw, QImage.Format.Format_RGB888)
-                    self.frame_ready.emit(qt_img.copy())
-            else:
-                if is_active and (time.time() - last_frame_time > 1.5):
-                    is_active = False
-                    self.tracks.clear()
-                    self.stream_inactive.emit(self.client_id)
-            self.msleep(10)
 
     def stop(self):
         self.running = False
         self.wait()
+
+    # ------------------------------------------------------------------
+    # Qt slots
+    # ------------------------------------------------------------------
+
+    def _on_faiss_updated(self):
+        """Flush recognition cache when FAISS index is rebuilt."""
+        self._last_faces = []
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    def run(self):
+        last_frame_time = 0.0
+        is_active       = False
+        frame_key       = f"stream:{self.client_id}:frame"
+
+        while self.running:
+            raw = cache.get(frame_key)
+
+            if raw:
+                frame = self._decode_frame(raw)
+                if frame is None:
+                    self.msleep(10)
+                    continue
+
+                last_frame_time = time.time()
+                if not is_active:
+                    is_active = True
+
+                # Inference on every Nth frame
+                self._frame_count = (self._frame_count + 1) % 10_000
+                if self._frame_count % INFERENCE_THROTTLE == 0:
+                    self._tracker.prune_stale()
+                    self._last_faces = self._run_inference(frame)
+
+                self._draw_frame(frame, self._last_faces)
+                self._emit_frame(frame)
+
+            else:
+                if is_active and (time.time() - last_frame_time > 1.5):
+                    is_active = False
+                    self._tracker.clear()
+                    self.stream_inactive.emit(self.client_id)
+
+            self.msleep(10)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _decode_frame(raw: bytes) -> np.ndarray | None:
+        """Decode JPEG bytes, rotate and flip for correct orientation."""
+        try:
+            arr   = np.frombuffer(raw, np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                return None
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            frame = cv2.flip(frame, 1)
+            return frame
+        except Exception:
+            return None
+
+    def _run_inference(self, frame: np.ndarray) -> list[dict]:
+        """
+        Downscale → InsightFace → match tracks → recognise → alert.
+        Returns list of face dicts ready for drawing.
+        """
+        h, w      = frame.shape[:2]
+        scale     = min(MAX_INFERENCE_SIZE / w, MAX_INFERENCE_SIZE / h)
+        inf_frame = (cv2.resize(frame,
+                               (int(w * scale), int(h * scale)),
+                               interpolation=cv2.INTER_AREA)
+                     if scale < 1.0 else frame)
+        if scale >= 1.0:
+            scale = 1.0
+
+        raw_faces    = face_app.get(inf_frame)
+        tracked      = self._tracker.update(raw_faces, scale)
+        parsed_faces = []
+
+        for item in tracked:
+            track    = item["track"]
+            track_id = item["track_id"]
+            bbox     = item["bbox"]
+
+            name, threat, meta = self._recognise(track, track_id)
+
+            # Activity log + alert
+            aadhr = meta.get("aadhar") if meta else None
+            if aadhr:
+                self._try_log(aadhr)
+            if threat == "High":
+                self._try_alert(name)
+
+            parsed_faces.append({
+                "bbox":  bbox,
+                "name":  name,
+                "threat": threat,
+                "lmk2d": item["lmk2d"],
+                "lmk3d": item["lmk3d"],
+            })
+
+        return parsed_faces
+
+    def _recognise(self, track, track_id: int) -> tuple[str, str, dict | None]:
+        """Return (name, threat_level, meta). Uses Redis cache first."""
+        emb       = track.avg_embedding
+        emb_hash  = hash(emb.tobytes()) & 0xFFFF_FFFF_FFFF_FFFF
+        cache_key = f"cache:face:{emb_hash}"
+        cached    = cache_str.get(cache_key)
+
+        if cached:
+            meta   = json.loads(cached)
+            return meta.get("name", "Unknown"), meta.get("threat_level", "Low"), meta
+
+        identity = watchdog.recognize_face(emb, threshold=0.45)
+        if identity:
+            self.person_identified.emit(identity)
+            cache_str.set(cache_key, json.dumps(identity), ex=int(FACE_CACHE_TTL_S))
+            return identity.get("name", "Unknown"), identity.get("threat_level", "Low"), identity
+
+        return "Unknown", "Low", None
+
+    def _try_log(self, aadhar: str):
+        """Log activity if not in cooldown."""
+        lock_key = f"log_lock:{aadhar}:{self.client_id}"
+        if not cache_str.get(lock_key):
+            watchdog.log_activity(aadhar, self.client_id)
+            cache_str.set(lock_key, "1", ex=int(LOG_COOLDOWN_S))
+
+    def _try_alert(self, name: str):
+        """Publish high-threat alert if not in cooldown."""
+        lock_key = f"alert_lock:{name}:{self.client_id}"
+        if not cache_str.get(lock_key):
+            msg = json.dumps({
+                "type":      "SECURITY_ALERT",
+                "message":   f"High Security Alert: {name} spotted at {self.client_id}",
+                "name":      name,
+                "source":    self.client_id,
+                "timestamp": time.time(),
+            })
+            cache.publish("security_alerts", msg)
+            cache_str.set(lock_key, "1", ex=int(ALERT_COOLDOWN_S))
+
+    # ------------------------------------------------------------------
+    # Drawing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _draw_face_mesh(frame: np.ndarray,
+                        points: np.ndarray,
+                        color: tuple = (0, 255, 0)):
+        size  = frame.shape
+        rect  = (0, 0, size[1], size[0])
+        sub   = cv2.Subdiv2D(rect)
+        for p in points:
+            if 0 <= p[0] < size[1] and 0 <= p[1] < size[0]:
+                sub.insert((float(p[0]), float(p[1])))
+        for t in sub.getTriangleList():
+            pts = [(int(t[i]), int(t[i+1])) for i in range(0, 6, 2)]
+            if all(0 <= pt[0] < size[1] and 0 <= pt[1] < size[0] for pt in pts):
+                cv2.line(frame, pts[0], pts[1], color, 1, cv2.LINE_AA)
+                cv2.line(frame, pts[1], pts[2], color, 1, cv2.LINE_AA)
+                cv2.line(frame, pts[2], pts[0], color, 1, cv2.LINE_AA)
+
+    def _draw_frame(self, frame: np.ndarray, faces: list[dict]):
+        for pf in faces:
+            bbox  = pf["bbox"]
+            name  = pf["name"]
+            threat = pf["threat"]
+            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]),
+                          (255, 0, 0), 1)
+            label_color = (0, 0, 255) if threat == "High" else (0, 255, 0)
+            cv2.putText(frame, f"{name.upper()} ({threat})",
+                        (bbox[0], bbox[1] - 15),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.7, label_color, 1)
+            mesh_pts = []
+            if pf["lmk2d"] is not None: mesh_pts.extend(pf["lmk2d"])
+            if pf["lmk3d"] is not None: mesh_pts.extend(pf["lmk3d"])
+            if mesh_pts:
+                self._draw_face_mesh(frame, np.array(mesh_pts))
+
+    def _emit_frame(self, frame: np.ndarray):
+        h, w        = frame.shape[:2]
+        tw, th      = self.target_size
+        scale       = min(tw / w, th / h)
+        nw, nh      = int(w * scale), int(h * scale)
+        out = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA) \
+              if nw > 0 and nh > 0 else frame
+        rgb = cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
+        sh, sw, sc  = rgb.shape
+        qt_img = QImage(rgb.data, sw, sh, sc * sw, QImage.Format.Format_RGB888)
+        self.frame_ready.emit(qt_img.copy())
