@@ -142,20 +142,15 @@ class DashboardWindow(QMainWindow):
 
     def _build_alert_banner(self):
         banner = QFrame()
+        banner.setObjectName("AlertBanner")
         banner.setFixedHeight(56)
-        banner.setStyleSheet("background: #3B0A12; border-bottom: 2px solid #FF5370;")
         banner.hide()
         lay = QHBoxLayout(banner)
         label = QLabel("⚠  SECURITY ALERT")
-        label.setStyleSheet("color: #FF5370; font-weight: 700; font-size: 14px; letter-spacing: 0.5px;")
+        label.setObjectName("AlertLabel")
         btn = QPushButton("DISMISS")
+        btn.setObjectName("AlertDismissBtn")
         btn.setFixedWidth(90)
-        btn.setStyleSheet("""
-            QPushButton { background: rgba(255,83,112,0.12); color: #FF5370;
-                border: 1px solid rgba(255,83,112,0.4); border-radius: 18px;
-                padding: 6px 12px; font-size: 11px; font-weight: 600; }
-            QPushButton:hover { background: rgba(255,83,112,0.22); }
-        """)
         btn.clicked.connect(banner.hide)
         lay.addSpacing(16); lay.addWidget(label); lay.addStretch()
         lay.addWidget(btn); lay.addSpacing(16)
@@ -168,27 +163,25 @@ class DashboardWindow(QMainWindow):
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 0, 16, 0)
 
-        logo = QLabel("⚡ RYUK AI")
-        logo.setStyleSheet("color: #00E5FF; font-weight: 800; font-size: 14px; letter-spacing: 2px;")
+        logo = QLabel("RYUK")
+        logo.setStyleSheet("color: #3B82F6; font-weight: 700; font-size: 14px; letter-spacing: 2px;")
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #2E3352; border: none; background: #2E3352;")
+        sep.setStyleSheet("color: #1E293B; border: none; background: #1E293B;")
         sep.setFixedWidth(1)
 
-        page_title = QLabel("GOD'S EYE GRID")
-        page_title.setStyleSheet("color:#9099C0; font-size: 11px; font-weight: 600; letter-spacing: 1.5px;")
+        page_title = QLabel("CAMERA GRID")
+        page_title.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600; letter-spacing: 1px;")
 
         clock = QLabel()
-        clock.setStyleSheet("color: #6B7299; font-size: 11px; font-family: 'Roboto Mono',monospace;")
+        clock.setStyleSheet("color: #64748B; font-size: 11px;")
 
-        url_lbl = QLabel(f"ws://{self.ip_address}:{SERVER_PORT}")
-        url_lbl.setStyleSheet("color: #3A4068; font-size: 10px; font-family: 'Roboto Mono',monospace;")
+        url_lbl = QLabel(f"{self.ip_address}:{SERVER_PORT}")
+        url_lbl.setStyleSheet("color: #334155; font-size: 10px;")
 
         tb_redis = QLabel("● REDIS")
-        tb_redis.setStyleSheet("color: #00E5FF; font-size: 10px; font-weight: 600;")
         tb_mongo = QLabel("● MONGO")
-        tb_mongo.setStyleSheet("color: #00E5FF; font-size: 10px; font-weight: 600;")
 
         lay.addWidget(logo)
         lay.addSpacing(12)
@@ -235,25 +228,19 @@ class DashboardWindow(QMainWindow):
 
     def _build_intel_panel(self):
         panel = QFrame()
+        panel.setObjectName("IntelPanel")
         panel.setFixedWidth(0)
-        panel.setStyleSheet("background: #111420; border-left: 1px solid #1A1E2E;")
         pl = QVBoxLayout(panel)
         pl.setContentsMargins(0, 0, 0, 0)
 
-        hdr = QLabel("DETECTED INTEL")
+        hdr = QLabel("TACTICAL INTELLIGENCE")
+        hdr.setObjectName("IntelHeader")
         hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hdr.setStyleSheet("""
-            color: #00E5FF; font-weight: 700; font-size: 10px;
-            letter-spacing: 2px; padding: 16px;
-            border-bottom: 1px solid #1A1E2E;
-        """)
         pl.addWidget(hdr)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none; background: transparent;")
         cont = QWidget()
-        cont.setStyleSheet("background: transparent;")
         list_lay = QVBoxLayout(cont)
         list_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
         list_lay.setSpacing(12)
@@ -432,7 +419,7 @@ class DashboardWindow(QMainWindow):
         try:
             from core.database import get_sync_db
             db = get_sync_db()
-            if db:
+            if db is not None:
                 db.command("ping"); mongo_ok = True
             else:
                 print("Health Check: MongoDB handle is None")

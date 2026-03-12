@@ -27,12 +27,11 @@ class CIView(QFrame):
         # Header
         hdr = QHBoxLayout()
         title = QLabel("CENTRAL INTELLIGENCE")
-        title.setStyleSheet("color: #E2E5F1; font-size: 20px; font-weight: 700; letter-spacing: 1px;")
+        title.setStyleSheet("color: #F8FAFC; font-size: 18px; font-weight: 700;")
         self.count_badge = QLabel("0 IDENTITIES")
         self.count_badge.setStyleSheet("""
-            color: #00E5C8; background: rgba(0,229,200,0.08);
-            border: 1px solid rgba(0,229,200,0.2); border-radius: 10px;
-            padding: 4px 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+            color: #10B981; background: rgba(16,185,129,0.1);
+            border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: 600;
         """)
         hdr.addWidget(title)
         hdr.addSpacing(12)
@@ -43,11 +42,7 @@ class CIView(QFrame):
 
         # Search bar
         self.search = QLineEdit()
-        self.search.setPlaceholderText("🔍  Search by name or UID…")
-        self.search.setStyleSheet(
-            "background: #111420; border: 1.5px solid #2E3352; border-radius: 10px;"
-            "padding: 12px 16px; color: #E2E5F1; font-size: 13px;"
-        )
+        self.search.setPlaceholderText("Search by name or ID…")
         self.search.textChanged.connect(self._filter)
         outer.addWidget(self.search)
         outer.addSpacing(16)
@@ -55,7 +50,6 @@ class CIView(QFrame):
         # Scrollable list
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setStyleSheet("border: none; background: transparent;")
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
         self._list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)

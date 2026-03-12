@@ -73,9 +73,13 @@ class StreamingServer:
         )
 
         try:
+            count = 0
             while True:
                 data = await websocket.receive_bytes()
-                cache.set(f"stream:{client_id}:frame", data, ex=2)
+                count += 1
+                if count % 100 == 0:
+                    print(f"DEBUG: Camera {client_id} — Received frame {count} ({len(data)} bytes)")
+                cache.set(f"stream:{client_id}:frame", data, ex=5)
         except WebSocketDisconnect:
             print(f"Camera {client_id} disconnected.")
         finally:

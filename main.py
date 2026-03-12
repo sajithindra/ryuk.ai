@@ -34,11 +34,8 @@ _bootstrap_cuda_library_path()
 # ============================================================================
 # Normal imports — GPU libs are now resolvable by the dynamic linker
 # ============================================================================
-from PyQt6.QtWidgets import QApplication
-import qdarktheme
-
-from core.server import run_server
-from ui.dashboard import DashboardWindow
+from ui.nice_gui import run_nicegui
+from config import SERVER_PORT
 
 if __name__ == "__main__":
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -51,15 +48,11 @@ if __name__ == "__main__":
         s.close()
 
     print("*" * 50)
-    print(f"* Server running at: ws://{IP}:8000/ws/stream")
+    print(f"* Ryuk AI — NiceGUI Terminal Starting")
+    print(f"* Dashboard: http://localhost:{SERVER_PORT}")
+    print(f"* Streaming API: ws://{IP}:{SERVER_PORT}/api/ws/stream")
     print("*" * 50)
 
-    server_thread = threading.Thread(target=run_server, args=(IP,), daemon=True)
-    server_thread.start()
-
-    qt_app = QApplication(sys.argv)
-    qt_app.setStyleSheet(qdarktheme.load_stylesheet("dark"))
-
-    dashboard = DashboardWindow(IP)
-    dashboard.show()
-    sys.exit(qt_app.exec())
+    # Note: NiceGUI's ui.run() is blocking. 
+    # The streaming server is mounted inside nice_gui.py
+    run_nicegui()

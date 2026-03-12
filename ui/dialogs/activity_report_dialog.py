@@ -58,8 +58,8 @@ class ActivityReportDialog(QMainWindow):
         self.setWindowTitle(f"TACTICAL INTELLIGENCE | {meta.get('name','').upper()}")
         self.setFixedSize(900, 700)
         self.setStyleSheet("""
-            QMainWindow { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1a1b26,stop:1 #0f1015); }
-            QWidget { font-family: 'Segoe UI','SF Pro Display',sans-serif; }
+            QMainWindow { background-color: #0F111A; }
+            QLabel { color: #F8FAFC; }
         """)
 
         central = QWidget()
@@ -71,13 +71,12 @@ class ActivityReportDialog(QMainWindow):
         # Left: log timeline
         left = QVBoxLayout()
         lbl_hdr = QLabel("CHRONOLOGICAL LOGS")
-        lbl_hdr.setStyleSheet("color: #00E5FF; font-weight: 800; font-size: 14px; margin-bottom: 10px;")
+        lbl_hdr.setStyleSheet("color: #94A3B8; font-weight: 700; font-size: 12px; margin-bottom: 10px;")
         left.addWidget(lbl_hdr)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFixedWidth(350)
-        self.scroll.setStyleSheet("border: none; background: transparent;")
-        cont = QWidget(); cont.setStyleSheet("background: transparent;")
+        cont = QWidget()
         self.list_layout = QVBoxLayout(cont)
         self.list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(cont)
@@ -87,29 +86,25 @@ class ActivityReportDialog(QMainWindow):
         right = QVBoxLayout()
         ah = QHBoxLayout()
         ai_hdr = QLabel("AI TACTICAL DOSSIER")
-        ai_hdr.setStyleSheet("color: #00E5FF; font-weight: 800; font-size: 14px;")
+        ai_hdr.setStyleSheet("color: #94A3B8; font-weight: 700; font-size: 12px;")
         self.timeframe_cb = QComboBox()
         self.timeframe_cb.addItems(["All Time", "Today", "Last 7 Days"])
-        self.timeframe_cb.setStyleSheet(
-            "background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);"
-            "border-radius: 8px; padding: 6px; color: #FFF; font-weight: 500;"
-        )
         ah.addWidget(ai_hdr); ah.addWidget(self.timeframe_cb)
         right.addLayout(ah)
 
         self.btn_gen = QPushButton("GENERATE DOSSIER")
-        self.btn_gen.setStyleSheet(
-            "background: rgba(0,229,255,0.15); color: #00E5FF; font-weight: bold;"
-            "padding: 12px; border-radius: 12px; border: 1px solid rgba(0,229,255,0.3);"
-        )
+        self.btn_gen.setStyleSheet("""
+            QPushButton { background: #3B82F6; color: #FFFFFF; font-weight: 600; padding: 10px; border-radius: 6px; border: none; }
+            QPushButton:hover { background: #2563EB; }
+        """)
         self.btn_gen.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_gen.clicked.connect(self._generate)
 
         self.btn_pdf = QPushButton("DOWNLOAD PDF")
-        self.btn_pdf.setStyleSheet(
-            "background: rgba(0,230,118,0.15); color: #00E676; font-weight: bold;"
-            "padding: 12px; border-radius: 12px; border: 1px solid rgba(0,230,118,0.3);"
-        )
+        self.btn_pdf.setStyleSheet("""
+            QPushButton { background: #10B981; color: #FFFFFF; font-weight: 600; padding: 10px; border-radius: 6px; border: none; }
+            QPushButton:hover { background: #059669; }
+        """)
         self.btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pdf.clicked.connect(self._download_pdf)
         self.btn_pdf.hide()
@@ -120,8 +115,8 @@ class ActivityReportDialog(QMainWindow):
         self.report_view = QTextEdit()
         self.report_view.setReadOnly(True)
         self.report_view.setStyleSheet(
-            "background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);"
-            "border-radius: 12px; padding: 15px; color: #E0E0E0; font-size: 13px;"
+            "background: #0F111A; border: 1px solid #1E293B; border-radius: 8px;"
+            "padding: 15px; color: #CBD5E1; font-size: 13px;"
         )
         self.report_view.setPlaceholderText(
             "Awaiting command. Select a timeframe and generate the intelligence dossier."
@@ -138,20 +133,19 @@ class ActivityReportDialog(QMainWindow):
         logs = watchdog.get_activity_report(self.meta["aadhar"])
         if not logs:
             lbl = QLabel("No activity recorded.")
-            lbl.setStyleSheet("color: #8A92A6; font-size: 12px; font-style: italic;")
+            lbl.setStyleSheet("color: #475569; font-size: 12px; font-style: italic;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.list_layout.addWidget(lbl)
             return
         for log in logs:
             row = QFrame()
-            row.setStyleSheet("background: transparent; border: none;")
             rl = QVBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(2)
             locs = log.get("locations", ["Unknown", "Unknown"])
             for txt, style in [
-                (log.get("date_str", "?"), "color: #00E5FF; font-weight: bold; font-size: 11px;"),
-                (f"📍 {locs[0]} ➔ {locs[1]}", "color: #FFF; font-size: 12px; font-weight: 600;"),
-                (f"DEVICE: {log.get('client_id','?')}", "color: #8A92A6; font-size: 10px;"),
+                (log.get("date_str", "?"), "color: #3B82F6; font-weight: 600; font-size: 11px;"),
+                (f"📍 {locs[0]} ➔ {locs[1]}", "color: #F8FAFC; font-size: 12px;"),
+                (f"DEVICE: {log.get('client_id','?')}", "color: #475569; font-size: 10px;"),
             ]:
                 l = QLabel(txt); l.setStyleSheet(style); rl.addWidget(l)
             self.list_layout.addWidget(row)

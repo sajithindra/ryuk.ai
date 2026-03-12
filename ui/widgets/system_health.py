@@ -11,19 +11,15 @@ class SystemHealthIndicator(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(30)
-        self.setStyleSheet("background: transparent; border-top: 1px solid #2E3352;")
+        self.setObjectName("SystemHealth")
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 0, 10, 0)
 
-        self.lbl_redis = QLabel("● REDIS")
-        self.lbl_redis.setStyleSheet(
-            "color: #00E5FF; font-size: 9px; font-weight: 600; border: none; letter-spacing: 0.5px;"
-        )
-        self.lbl_mongo = QLabel("● MONGO")
-        self.lbl_mongo.setStyleSheet(
-            "color: #00E5FF; font-size: 9px; font-weight: 600; border: none; letter-spacing: 0.5px;"
-        )
+        self.lbl_redis = QLabel("REDIS")
+        self.lbl_redis.setObjectName("HealthLabel")
+        self.lbl_mongo = QLabel("MONGO")
+        self.lbl_mongo.setObjectName("HealthLabel")
 
         lay.addWidget(self.lbl_redis)
         lay.addSpacing(12)
@@ -31,12 +27,6 @@ class SystemHealthIndicator(QFrame):
         lay.addStretch()
 
     def update_status(self, redis_ok: bool, mongo_ok: bool):
-        _ok, _err = "#00E5FF", "#FF5370"
-        self.lbl_redis.setText(f"{'●' if redis_ok else '○'} REDIS")
-        self.lbl_redis.setStyleSheet(
-            f"color: {_ok if redis_ok else _err}; font-size: 9px; font-weight: 600; border: none;"
-        )
-        self.lbl_mongo.setText(f"{'●' if mongo_ok else '○'} MONGO")
-        self.lbl_mongo.setStyleSheet(
-            f"color: {_ok if mongo_ok else _err}; font-size: 9px; font-weight: 600; border: none;"
-        )
+        _ok, _err = "#10B981", "#EF4444"
+        self.lbl_redis.setStyleSheet(f"color: {_ok if redis_ok else _err}; font-weight: 600; font-size: 10px;")
+        self.lbl_mongo.setStyleSheet(f"color: {_ok if mongo_ok else _err}; font-weight: 600; font-size: 10px;")

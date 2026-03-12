@@ -18,18 +18,15 @@ class CameraGridView(QScrollArea):
         self.setStyleSheet("border: none;")
 
         self._container = QWidget()
-        self._container.setStyleSheet("background-color: #080A0F;")
         self.grid = QGridLayout(self._container)
         self.grid.setContentsMargins(24, 24, 24, 24)
         self.grid.setSpacing(20)
         self.setWidget(self._container)
 
         # Empty state
-        self.empty_label = QLabel("No active streams\nConnect a camera device to begin")
+        self.empty_label = QLabel("No active streams")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(
-            "color: #252A42; font-size: 16px; font-weight: 500; border: none;"
-        )
+        self.empty_label.setStyleSheet("color: #475569; font-size: 14px;")
         self.grid.addWidget(self.empty_label, 0, 0)
         self._card_count = 0
 

@@ -24,14 +24,8 @@ class EditProfileDialog(QMainWindow):
         self.setFixedSize(400, 560)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint)
         self.setStyleSheet("""
-            QMainWindow { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1a1b26,stop:1 #0f1015); }
-            QWidget { font-family: 'Segoe UI','SF Pro Display',sans-serif; }
-            QLineEdit {
-                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 8px; padding: 12px; color: #FFF; font-size: 13px;
-            }
-            QLineEdit:focus { border-color: #00E5FF; }
-            QLabel { color: #E2E5F1; }
+            QMainWindow { background-color: #0F111A; }
+            QLabel { color: #F8FAFC; }
         """)
 
         central = QWidget()
@@ -41,13 +35,13 @@ class EditProfileDialog(QMainWindow):
         lay.setSpacing(12)
 
         hdr = QLabel("UPDATE PROFILE")
-        hdr.setStyleSheet("color: #00E5FF; font-weight: 800; font-size: 18px;")
+        hdr.setStyleSheet("color: #F8FAFC; font-weight: 700; font-size: 16px;")
         lay.addWidget(hdr)
 
         # Circular photo
         photo = QLabel()
         photo.setFixedSize(90, 90)
-        photo.setStyleSheet("border-radius: 45px; background: #16191E; border: 2px solid #2D3139;")
+        photo.setStyleSheet("border-radius: 45px; background: #1A1D2B; border: 1px solid #334155;")
         photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         thumb = meta.get("photo_thumb", "")
         if thumb:
@@ -80,17 +74,13 @@ class EditProfileDialog(QMainWindow):
         self.threat_in = QComboBox()
         self.threat_in.addItems(["Low", "Medium", "High"])
         self.threat_in.setCurrentText(meta.get("threat_level", "Low"))
-        self.threat_in.setStyleSheet(
-            "background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);"
-            "border-radius: 8px; padding: 12px; color: #FFF;"
-        )
 
         for lbl, widget in [
             ("FULL NAME", self.name_in), ("PHONE", self.phone_in),
             ("RESIDENCE", self.address_in), ("SECURITY CLEARANCE", self.threat_in),
         ]:
             l = QLabel(lbl)
-            l.setStyleSheet("color: #6B7299; font-size: 10px; font-weight: 600; letter-spacing: 0.5px;")
+            l.setStyleSheet("color: #475569; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;")
             lay.addWidget(l)
             lay.addWidget(widget)
 
@@ -99,8 +89,8 @@ class EditProfileDialog(QMainWindow):
         btn = QPushButton("SAVE CHANGES")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("""
-            QPushButton { background: #00E5FF; color: #003E45; font-weight: 700; padding: 14px; border-radius: 8px; border: none; }
-            QPushButton:hover { background: #33EAFF; }
+            QPushButton { background: #3B82F6; color: #FFFFFF; font-weight: 600; padding: 12px; border-radius: 6px; border: none; }
+            QPushButton:hover { background: #2563EB; }
         """)
         btn.clicked.connect(self._save)
         lay.addWidget(btn)

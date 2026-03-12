@@ -2,6 +2,7 @@ import warnings
 import os
 import numpy as np
 import onnxruntime as ort
+import ctypes.util
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="insightface")
 warnings.filterwarnings("ignore", category=FutureWarning, module="skimage")
@@ -20,6 +21,8 @@ print(f"  ORT {ort.__version__} | Providers: {_available}")
 #            CPUExecutionProvider        ← last resort
 # =============================================================================
 
+_HAS_TRT = ctypes.util.find_library('nvinfer') is not None
+
 _TRT_CACHE = os.path.join(os.path.dirname(__file__), "..", "data", "trt_cache")
 os.makedirs(_TRT_CACHE, exist_ok=True)
 
@@ -28,32 +31,29 @@ _trt_options = {
     "trt_fp16_enable":             True,
     "trt_engine_cache_enable":     True,
     "trt_engine_cache_path":       _TRT_CACHE,
-    "trt_max_workspace_size":      3 * 1024 * 1024 * 1024,  # 3 GB
-    "trt_builder_optimization_level": 5,                    # max fusion
-    "trt_timing_cache_enable":     True,                    # reuse timing across sessions
+    "trt_max_workspace_size":      1 * 1024 * 1024 * 1024,  # 1 GB
+    "trt_builder_optimization_level": 5,
+    "trt_timing_cache_enable":     True,
     "trt_timing_cache_path":       _TRT_CACHE,
-    "trt_auxiliary_streams":       4,                       # parallel streams for small ops
-    "trt_dump_ep_context_model":   False,
 }
 
 _cuda_options = {
     "device_id":                   0,
-    "gpu_mem_limit":               5 * 1024 * 1024 * 1024,  # 5 GB
-    "arena_extend_strategy":       "kNextPowerOfTwo",
-    "cudnn_conv_algo_search":      "EXHAUSTIVE",
+    "gpu_mem_limit":               3 * 1024 * 1024 * 1024,  # 3 GB (Slightly more than 2GB)
+    "arena_extend_strategy":       "kSameAsRequested",
+    "cudnn_conv_algo_search":      "DEFAULT",
     "do_copy_in_default_stream":   True,
-    "enable_cuda_graph":           True,
 }
 
 providers = []
-if "TensorrtExecutionProvider" in _available:
+if "TensorrtExecutionProvider" in _available and _HAS_TRT:
     providers.append(("TensorrtExecutionProvider", _trt_options))
 if "CUDAExecutionProvider" in _available:
     providers.append(("CUDAExecutionProvider", _cuda_options))
 providers.append("CPUExecutionProvider")
 
 face_app = FaceAnalysis(name='buffalo_l', providers=providers)
-face_app.prepare(ctx_id=0, det_size=(640, 640))
+face_app.prepare(ctx_id=0, det_size=(320, 320))
 
 # Report active providers for each model
 for model_name, model in face_app.models.items():
@@ -64,13 +64,3 @@ for model_name, model in face_app.models.items():
     print(f"  {status} {model.taskname}")
 
 print("InsightFace GPU initialization complete.")
-
-def warmup():
-    """Run a dummy inference to pre-allocate GPU memory and tune cuDNN kernels."""
-    print("GPU Warmup: Running dummy inference to eliminate initial lag...")
-    dummy_frame = np.zeros((640, 640, 3), dtype=np.uint8)
-    # The first call triggers TRT/cuDNN kernel selection and memory allocation
-    face_app.get(dummy_frame)
-    print("GPU Warmup: Complete. Application is ready for instant streaming.")
-
-warmup()

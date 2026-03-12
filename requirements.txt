@@ -9,3 +9,7 @@ PyQt6
 qdarktheme
 onnxruntime-gpu
 insightface
+nicegui
+redis
+motor
+pyyaml

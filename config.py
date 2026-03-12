@@ -27,15 +27,15 @@ IDENTITIES_PKL = os.path.join(DATA_DIR, "identities.pkl")
 # ---------------------------------------------------------------------------
 # Face recognition
 # ---------------------------------------------------------------------------
-FAISS_THRESHOLD       = 0.48   # Balanced for lighting/pose (0.60 was too strict)
+FAISS_THRESHOLD       = 0.40   # Refined for maximum detection sensitivity
 MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
-INFERENCE_THROTTLE    = 4      # Run heavy AI every Nth frame
+INFERENCE_THROTTLE    = 2      # Run heavy AI every Nth frame (Lower = smoother)
 FACE_MAX_INACTIVE_S   = 2.0    # Seconds before a stale track is pruned
 FACE_TRACK_MAX_DIST   = 150    # Max centroid distance for track matching
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
-MAX_INFERENCE_SIZE    = 480    # Max frame dimension for inference downscale
+MAX_INFERENCE_SIZE    = 320    # Reverted for VRAM stability
 
 # ---------------------------------------------------------------------------
 # Redis TTLs & cooldowns
@@ -56,8 +56,8 @@ SERVER_PORT = 8000
 # ---------------------------------------------------------------------------
 WINDOW_WIDTH  = 1400
 WINDOW_HEIGHT = 900
-POLL_INTERVAL_MS   = 500
-ALERT_INTERVAL_MS  = 500
+POLL_INTERVAL_MS   = 100
+ALERT_INTERVAL_MS  = 100
 CLEANUP_INTERVAL_MS = 1000
 HEALTH_INTERVAL_MS = 3000
 INTEL_CLEANUP_S    = 5.0   # Remove intel card if person unseen for N seconds

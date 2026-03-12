@@ -24,24 +24,44 @@ from config import (
 
 class FaceTrack:
     """State container for a single tracked face."""
-    __slots__ = ("track_id", "centroid", "last_seen", "embedding_history", "id_cache", "smoothed_bbox")
+    __slots__ = ("track_id", "centroid", "velocity", "last_seen", "embedding_history", "id_cache", "smoothed_bbox")
 
     def __init__(self, track_id: int, centroid: np.ndarray, embedding: np.ndarray, bbox: np.ndarray):
         self.track_id          = track_id
         self.centroid          = centroid
+        self.velocity          = np.array([0.0, 0.0])
         self.last_seen         = time.time()
         self.embedding_history = deque([embedding], maxlen=FACE_TRACK_HISTORY)
         self.id_cache          = None   # last recognised identity dict
         self.smoothed_bbox     = bbox.astype(float)
 
     def update(self, centroid: np.ndarray, embedding: np.ndarray, bbox: np.ndarray):
+        from config import INFERENCE_THROTTLE
+        # Calculate velocity over the throttle period and normalize to a single frame step
+        raw_velocity = centroid - self.centroid
+        # Heavy smoothing for velocity and position
+        beta = 0.8
+        new_v = raw_velocity / max(1, INFERENCE_THROTTLE)
+        self.velocity = beta * self.velocity + (1.0 - beta) * new_v
+        
         self.centroid  = centroid
         self.last_seen = time.time()
         self.embedding_history.append(embedding)
         
-        # Exponential Moving Average for bbox smoothing
-        alpha = 0.3
+        # Heavy smoothing (Alpha 0.1)
+        alpha = 0.1
         self.smoothed_bbox = alpha * bbox.astype(float) + (1.0 - alpha) * self.smoothed_bbox
+
+    def predict(self):
+        """Linearly advance the box based on last velocity (prevents visual lag) with damping."""
+        vx, vy = self.velocity
+        self.smoothed_bbox[0] += vx
+        self.smoothed_bbox[1] += vy
+        self.smoothed_bbox[2] += vx
+        self.smoothed_bbox[3] += vy
+        
+        # Damping to prevent infinite drift
+        self.velocity *= 0.95
 
     @property
     def avg_embedding(self) -> np.ndarray:
@@ -135,6 +155,11 @@ class FaceTracker:
 
     def clear(self):
         self._tracks.clear()
+
+    def predict(self):
+        """Advance all tracks based on their last known velocity."""
+        for track in self._tracks.values():
+            track.predict()
 
     def __len__(self) -> int:
         return len(self._tracks)

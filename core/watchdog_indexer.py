@@ -118,7 +118,7 @@ class WatchdogIndexer:
 
     def update_index(self):
         """Rebuilds the in-memory FAISS index from MongoDB."""
-        if self._db is None:
+        if self._db is None or self._profiles_col is None:
             print("FAISS Error: MongoDB unreachable. Cannot rebuild index.")
             return
 
@@ -233,9 +233,12 @@ class WatchdogIndexer:
             embedding = embedding / norm
         query = np.array([embedding], dtype="float32")
         sims, idxs = self._faiss_index.search(query, k=1)
-        if sims[0][0] > threshold and idxs[0][0] != -1:
-            return self._faiss_mapping[idxs[0][0]]
-        return None
+        score = float(sims[0][0])
+        if score > threshold and idxs[0][0] != -1:
+            meta = self._faiss_mapping[idxs[0][0]].copy()
+            meta['score'] = score
+            return meta
+        return {'score': score} if idxs[0][0] != -1 else None
 
     def log_activity(self, aadhar: str, client_id: str):
         """Record a timestamped detection, gated by a Redis cooldown key."""
@@ -248,27 +251,29 @@ class WatchdogIndexer:
         loc_key   = f"cache:cam_loc:{client_id}"
         cached    = cache_str.get(loc_key)
         if cached:
-            locations = json.loads(cached)
+            location = cached
         else:
-            cam       = self._cameras_col.find_one({"client_id": client_id})
-            locations = cam.get("locations", ["Unknown", "Unknown"]) if cam else ["Unknown", "Unknown"]
-            cache_str.setex(loc_key, int(CAM_LOC_TTL_S), json.dumps(locations))
+            cam      = self._cameras_col.find_one({"client_id": client_id})
+            # Use the first location as the primary name, or default to "Main Terminal"
+            loc_list = cam.get("locations", ["Main Terminal"]) if cam else ["Main Terminal"]
+            location = loc_list[0] if loc_list else "Main Terminal"
+            cache_str.setex(loc_key, int(CAM_LOC_TTL_S), location)
 
         try:
             self._activity_col.insert_one({
                 "aadhar":    aadhar,
                 "client_id": client_id,
-                "locations": locations,
+                "location":  location,
                 "timestamp": datetime.now(),
                 "date_str":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             })
             cache_str.setex(cooldown_key, int(LOG_COOLDOWN_S), "1")
-            print(f"Watchdog: Logged {aadhar} @ {client_id} {locations}")
+            print(f"Watchdog: Logged {aadhar} @ {location}")
         except Exception as e:
             print(f"Watchdog: Log failed — {e}")
 
     def get_all_profiles(self) -> list[dict]:
-        if self._db is None:
+        if self._profiles_col is None:
             return []
         try:
             return list(self._profiles_col.find({}))
@@ -276,14 +281,14 @@ class WatchdogIndexer:
             return []
 
     def delete_profile(self, aadhar: str):
-        if self._db is None:
+        if self._profiles_col is None:
             return
         self._profiles_col.delete_one({"aadhar": aadhar})
         self.update_index()
         print(f"MongoDB: Deleted {aadhar}")
 
     def update_profile(self, aadhar: str, data: dict):
-        if self._db is None:
+        if self._profiles_col is None:
             return
         self._profiles_col.update_one({"aadhar": aadhar}, {"$set": data})
         self.update_index()
@@ -306,7 +311,7 @@ class WatchdogIndexer:
 
     def augment_identity(self, aadhar: str, embedding: np.ndarray):
         """Add a new embedding (pose) to an existing profile in MongoDB."""
-        if self._db is None or not aadhar:
+        if self._profiles_col is None or not aadhar:
             return
             
         self._profiles_col.update_one(
