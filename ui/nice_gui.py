@@ -12,9 +12,10 @@ import cv2
 import queue
 import base64
 import io
+import urllib.parse
 
 from core.state import cache, cache_str
-from core.database import get_sync_db, profiles_col, cameras_col
+from core.database import get_sync_db, profiles_col, cameras_col, devices_col, init_db
 from core.server import app as streaming_app
 from core.watchdog_indexer import get_all_profiles, delete_profile, register_camera_metadata
 from components.processor import Processor
@@ -45,8 +46,16 @@ class NiceDashboard:
         self.ip_address = ip_address
         self.intel_cards: Dict[str, dict] = {} # aadhar -> metadata
         self.intel_last_seen: Dict[str, float] = {} # aadhar -> time
+        self.intel_counts: Dict[str, int] = {} # aadhar -> count
+        self.intel_is_active: Dict[str, bool] = {} # aadhar -> is currently in view
+        self.intel_elements: Dict[str, ui.element] = {} # aadhar -> ui row
+        self.intel_count_labels: Dict[str, ui.label] = {} # aadhar -> counter label
         self.redis_healthy = False
         self.mongo_healthy = False
+        
+        # Unique ID for this dashboard instance (for processor listeners)
+        import uuid
+        self.dashboard_id = str(uuid.uuid4())
         
         # Setup page
         self._setup_ui()
@@ -192,7 +201,8 @@ class NiceDashboard:
                     # -- Tab 0: High-Tech Grid --
                     with ui.tab_panel(0).classes('p-6 bg-transparent'):
                         self.grid = ui.grid(columns=2).classes('w-full gap-6')
-                        with ui.column().classes('w-full items-center justify-center py-40 gap-4') as self.empty_container:
+                        self.empty_container = ui.column().classes('w-full items-center justify-center py-40 gap-4')
+                        with self.empty_container:
                             ui.icon('radar', size='48px', color='white').classes('animate-pulse opacity-10')
                             ui.label("OPTIMIZING SIGNAL...").classes('font-black tracking-[4px] text-[10px] opacity-20')
                         self.empty_label = self.empty_container
@@ -282,13 +292,32 @@ class NiceDashboard:
         except Exception as e:
             print(f"DEBUG: Error pulling db_cids: {e}")
         
+        if active_cids:
+            print(f"DEBUG: UI Registry Sync — Active CIDs: {active_cids}")
+        
         # Priority: Show all active streams first, then fill up to 4 with offline DB cameras
         active_list = sorted([cid for cid in active_cids])
         offline_list = sorted([cid for cid in db_cids if cid not in active_cids])
         
+        # New: Add cameras from 'devices' collection (RTSP)
+        rtsp_devices = []
+        try:
+            if sync_db is not None:
+                for dev in sync_db["devices"].find():
+                    rtsp_devices.append(dev)
+        except Exception as e:
+            print(f"DEBUG: Error pulling rtsp_devices: {e}")
+
         to_show = active_list + offline_list
-        limit = max(4, len(active_list))
+        # Logic adjustment: we want to show RTSP devices too
+        rtsp_cids = [dev['ip'] for dev in rtsp_devices]
+        to_show = list(dict.fromkeys(to_show + rtsp_cids)) # Unique list
+        
+        limit = max(4, len(to_show))
         to_show = to_show[:limit]
+        
+        # Ensure "+" button is always at the end if we have space
+        show_add_btn = True
         
         # Remove cards no longer in the restricted list
         for cid in list(self.camera_cards.keys()):
@@ -298,7 +327,7 @@ class NiceDashboard:
         
         # Ensure all required cards exist and are in the correct order
         for idx, cid in enumerate(to_show):
-            is_active = cid in active_cids
+            is_active = cid in active_cids or cid in rtsp_cids
             if cid not in self.camera_cards:
                 self._create_camera_card(cid, is_active)
             
@@ -308,14 +337,34 @@ class NiceDashboard:
                 if list(self.grid).index(card) != idx:
                     card.move(self.grid, idx)
             except ValueError:
-                # If card somehow not in list(grid), re-create or just ignore for this cycle
                 pass
             
-            # Manage AI sessions back-end
-            if is_active and cid not in active_sessions:
-                self._start_session(cid)
+            # Manage AI sessions back-end (Thread-safe registration)
+            if is_active:
+                source_url = None
+                if cid in rtsp_cids:
+                    dev = next(d for d in rtsp_devices if d['ip'] == cid)
+                    # rtsp://username:password@ip:554/cam/realmonitor?channel=1&subtype=1
+                    source_url = f"rtsp://{dev['username']}:{dev['password']}@{dev['ip']}:554/cam/realmonitor?channel=1&subtype=1"
+
+                if cid not in active_sessions:
+                    self._start_session(cid, source_url)
+                else:
+                    # Session already exists, ensure WE are listening to it
+                    proc = active_sessions[cid]
+                    proc.add_listener(self)
+                    if proc.latest_processed_frame:
+                         if not getattr(card, 'is_streaming', False):
+                             self.ui_queue.put(lambda c=cid: self._handle_stream_actual_start(c))
             elif not is_active and cid in active_sessions:
                 self._stop_session(cid)
+        
+        # Add "+" button card if not present
+        if show_add_btn and "add_btn" not in self.camera_cards:
+            self._create_add_camera_card()
+        elif "add_btn" in self.camera_cards:
+            # Ensure it is at the end
+            self.camera_cards["add_btn"].move(self.grid, len(to_show))
                 
     def _create_camera_card(self, client_id: str, active: bool):
         with self.grid:
@@ -323,7 +372,7 @@ class NiceDashboard:
                 card.client_id = client_id
                 with ui.element('div').classes('w-full aspect-video relative bg-black/40 flex items-center justify-center') as container:
                     card.container = container
-                    card.stream_img = ui.html('').classes('w-full h-full')
+                    card.stream_img = ui.interactive_image().classes('w-full h-full')
                     card.stream_img.set_visibility(False)
                     card.placeholder = ui.icon('videocam_off', size='64px', color='white').classes('opacity-10')
                     ui.element('div').classes('scanline')
@@ -332,7 +381,15 @@ class NiceDashboard:
                     with ui.row().classes('absolute top-3 left-3 items-center gap-2'):
                         card.rec_dot = ui.label("REC").classes('text-[8px] font-black text-red-500 animate-pulse')
                         card.rec_dot.set_visibility(False)
-                        ui.label(client_id.upper()).classes('text-[8px] font-black tracking-[2px] opacity-70')
+                        client_label = ui.label(client_id.upper()).classes('text-[8px] font-black tracking-[2px] opacity-70')
+                        with client_label:
+                            ui.tooltip("Loading device info...").classes('bg-black/90 text-blue-300 font-mono text-[9px]')
+                            card.device_tooltip = client_label
+                    
+                    # Device Info Overlay (Bottom)
+                    with ui.row().classes('absolute bottom-0 left-0 w-full p-2 bg-black/60 backdrop-blur-sm justify-between items-center opacity-60 transition-opacity hover:opacity-100') as info_overlay:
+                        card.info_overlay = info_overlay
+                        card.device_display = ui.label("SIGNAL OPTIMIZING...").classes('text-[7px] font-mono text-blue-300 tracking-wider')
                 
                 with ui.row().classes('w-full items-center p-3 px-4'):
                     card.status_label = ui.label("SIGNAL OFFLINE").classes('text-[8px] font-black tracking-widest text-red-500')
@@ -342,23 +399,72 @@ class NiceDashboard:
         self.camera_cards[client_id] = card
         self.empty_label.set_visibility(False)
 
-    def _start_session(self, client_id: str):
+    def _create_add_camera_card(self):
+        with self.grid:
+            with ui.card().classes('w-full aspect-video p-0 cyber-panel overflow-hidden cam-card flex items-center justify-center border-dashed border-2 opacity-50 hover:opacity-100 transition-opacity cursor-pointer') as card:
+                card.on('click', self._show_add_camera_dialog)
+                ui.icon('add', size='64px', color='white').classes('opacity-20')
+                ui.label("ADD CAMERA SOURCE").classes('font-black tracking-[4px] text-[10px] opacity-20 mt-4')
+                ui.element('div').classes('scanline')
+        self.camera_cards["add_btn"] = card
+
+    def _show_add_camera_dialog(self):
+        with ui.dialog().classes('p-0') as dialog, ui.card().classes('w-[500px] cyber-panel p-8 gap-6'):
+            ui.label("LINK NEW CAMERA NODE").classes('text-lg font-black tracking-widest mb-2 glow-text')
+            
+            ip_input = ui.input(label="IP ADDRESS").props('dark standout square').classes('w-full')
+            user_input = ui.input(label="USERNAME").props('dark standout square').classes('w-full')
+            pass_input = ui.input(label="PASSWORD").props('dark standout square password').classes('w-full')
+            
+            async def save():
+                if not ip_input.value or not user_input.value or not pass_input.value:
+                    ui.notify("ALL FIELDS ARE MANDATORY", type='warning')
+                    return
+                
+                device_data = {
+                    "ip": ip_input.value,
+                    "username": user_input.value,
+                    "password": pass_input.value,
+                    "added_at": datetime.now()
+                }
+                
+                try:
+                    sync_db = get_sync_db()
+                    if sync_db is not None:
+                        sync_db["devices"].update_one({"ip": ip_input.value}, {"$set": device_data}, upsert=True)
+                        ui.notify("CAMERA SOURCE VERIFIED AND SAVED", color='green')
+                        dialog.close()
+                        self._check_new_streams()
+                except Exception as e:
+                    ui.notify(f"LINKING FAILED: {e}", color='red')
+
+            with ui.row().classes('w-full justify-end gap-3 mt-4'):
+                ui.button("CANCEL", on_click=dialog.close).props('flat dark')
+                ui.button("LINK DEVICE", on_click=save).classes('px-6 font-black').style('background-color: #380036;')
+        dialog.open()
+
+    def _start_session(self, client_id: str, source_url: Optional[str] = None):
         global active_sessions
         if client_id in active_sessions: return
         
-        print(f"DEBUG: Starting Dashboard Session for CID: {client_id}")
-        proc = Processor(client_id)
-        # Thread-safe task submission via queue
-        proc.on_detection = lambda meta: self.ui_queue.put(lambda: self._handle_detection(meta))
-        proc.on_stream_start = lambda cid: self.ui_queue.put(lambda: self._handle_stream_actual_start(cid))
-        proc.on_inactive = lambda cid: self.ui_queue.put(lambda: self._stop_session(cid))
+        print(f"DEBUG: Dashboard — Starting Session for CID: {client_id}")
+        proc = Processor(client_id, source_url=source_url)
+        # Register ourselves as a listener
+        proc.add_listener(self)
         proc.start()
         active_sessions[client_id] = proc
+        print(f"DEBUG: Dashboard — Session registry updated. Total active: {len(active_sessions)}")
         
-        # Initial status change to show we are trying to connect
-        if client_id in self.camera_cards:
-            self.camera_cards[client_id].status_label.set_text("TUNING SIGNAL...")
-            self.camera_cards[client_id].status_label.classes(replace='text-red-500', add='text-orange-500')
+    # --- Multi-Listener Processor Callbacks (called from Processor threads) ---
+    def on_detection(self, meta):
+        self.ui_queue.put(lambda: self._handle_detection(meta))
+
+    def on_stream_start(self, client_id):
+        print(f"DEBUG: UI Listener — Received stream_start for {client_id}")
+        self.ui_queue.put(lambda: self._handle_stream_actual_start(client_id))
+
+    def on_inactive(self, client_id):
+        self.ui_queue.put(lambda: self._stop_session(client_id))
 
     def _process_ui_queue(self):
         """Processes pending UI tasks from the thread-safe queue on the main thread."""
@@ -370,8 +476,10 @@ class NiceDashboard:
                 print(f"UI Queue Error: {e}")
 
     def _handle_stream_actual_start(self, client_id: str):
+        print(f"DEBUG: UI — Handling stream actual start for {client_id}")
         # Safety check: if card is no longer in camera_cards (e.g., removed during transition)
         if client_id not in self.camera_cards:
+            print(f"DEBUG: UI — ABORT start: card missing for {client_id}")
             return
 
         # This runs when the first frame is RECEIVED by the processor
@@ -379,13 +487,52 @@ class NiceDashboard:
             card = self.camera_cards[client_id]
             if not card.stream_img: return
             
-            card.stream_img.content = f'<img src="/stream/{client_id}?t={time.time()}" style="width:100%; height:100%; object-fit:cover; width:100%; height:100%">'
+            if getattr(card, 'is_streaming', False):
+                return
+            
+            # Use URL-encoded client_id to handle colons properly
+            encoded_cid = urllib.parse.quote(client_id)
+            # Use set_source for the interactive_image
+            card.stream_img.set_source(f"/stream/{encoded_cid}?t={time.time()}")
             card.stream_img.set_visibility(True)
             card.placeholder.set_visibility(False)
             card.rec_dot.set_visibility(True)
-            card.status_label.set_text("SIGNAL ACTIVE")
+            card.is_streaming = True
+            
+            # Fetch device info to update UI
+            dev_name = "SIGNAL ACTIVE"
+            tactical_loc = "OFF-SITE"
+            
+            from core.database import get_sync_db
+            db = get_sync_db()
+            if db is not None:
+                # Try cameras collection first, then devices
+                cam = db["cameras"].find_one({"client_id": client_id})
+                if not cam:
+                    cam = db["devices"].find_one({"ip": client_id})
+                
+                if cam:
+                    if "device_info" in cam:
+                        di = cam.get("device_info", {})
+                        dev_name = di.get('device_display_name') or di.get('device_name', 'Unnamed Node')
+                        info_str = f"NAME: {dev_name}\nOS: {di.get('platform', 'Unknown')}\nAGENT: {di.get('user_agent','Unknown')[:50]}..."
+                        
+                        card.device_display.set_text(f"{dev_name.upper()} // {di.get('platform', 'UNK').upper()}")
+                        with card.device_tooltip:
+                            ui.tooltip(info_str).classes('bg-black/95 text-blue-300 font-mono text-[9px] whitespace-pre')
+                    else:
+                        # RTSP Device fallback
+                        dev_name = f"CAM-{client_id}"
+                        card.device_display.set_text(f"{dev_name} // RTSP")
+                        with card.device_tooltip:
+                             ui.tooltip(f"RTSP SOURCE: {client_id}").classes('bg-black/95 text-blue-300 font-mono text-[9px]')
+
+                    loc_list = cam.get("locations", [])
+                    tactical_loc = loc_list[0] if loc_list else "RTSP SOURCE"
+
+            card.status_label.set_text(dev_name.upper())
             card.status_label.classes(replace='text-red-500 text-orange-500', add='text-green-500')
-            card.meta_label.set_text("1080p // 30fps")
+            card.meta_label.set_text(tactical_loc.upper())
         
         self._add_log_entry("SIGNAL", f"STREAM LIVE: {client_id}", "green")
 
@@ -397,14 +544,21 @@ class NiceDashboard:
     def _stop_session(self, client_id: str):
         global active_sessions
         print(f"NiceGUI: Stopping session {client_id}")
-        proc = active_sessions.pop(client_id, None)
+        # Instead of stopping the global processor immediately, we just stop listening.
+        # The last dashboard instance to disconnect (or the processor's own timeout) will stop it.
+        proc = active_sessions.get(client_id)
         if proc:
-            proc.stop()
+            proc.remove_listener(self)
+            if not proc.listeners:
+                 active_sessions.pop(client_id)
+                 proc.stop()
         
-        # UI Updates
+        # UI Updates (Always run for this dashboard instance)
         if client_id in self.camera_cards:
             card = self.camera_cards[client_id]
-            card.stream_img.content = '<img src="" style="display:none;">'
+            card.is_streaming = False
+            card.stream_img.set_source('')
+            card.stream_img.set_visibility(False)
             card.placeholder.set_visibility(True)
             card.rec_dot.set_visibility(False)
             card.status_label.set_text("OFFLINE")
@@ -419,36 +573,67 @@ class NiceDashboard:
         self.intel_last_seen[aadhar] = time.time()
         
         if aadhar not in self.intel_cards:
+            self.intel_counts[aadhar] = 1
+            self.intel_is_active[aadhar] = True
             self.intel_cards[aadhar] = metadata
             with self.intel_container:
                 self.no_intel_label.set_visibility(False)
                 threat = metadata.get('threat_level', 'Low')
                 threat_color = 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'
-                with ui.row().classes('w-full no-wrap gap-4 intel-item p-3 border-r border-white/5 shadow-xl animate-fade').style('background: rgba(255,255,255,0.02)'):
+                with ui.row().classes('w-full no-wrap gap-4 intel-item p-3 border-r border-white/5 shadow-xl animate-fade').style('background: rgba(255,255,255,0.02)') as card:
+                    self.intel_elements[aadhar] = card
                     ui.avatar('person', color='transparent').classes('border border-white/10').style('background-color: #380036; color: white')
                     with ui.column().classes('gap-0 grow'):
                         ui.label(metadata.get('name', 'Unknown')).classes('font-black text-xs tracking-wider')
                         ui.label(aadhar).classes('text-[8px] font-mono opacity-40')
                         with ui.row().classes('items-center gap-2 mt-2'):
                             ui.badge(threat.upper()).props(f'color={threat_color} size=xs').classes('text-[7px] px-2')
-                    ui.label("MATCH 98.4%").classes('text-[8px] font-black opacity-30')
+                    
+                    with ui.column().classes('items-end gap-1'):
+                        self.intel_count_labels[aadhar] = ui.label("×1").classes('text-[10px] font-black text-orange-500 opacity-80')
+                        ui.label("MATCH 98%").classes('text-[7px] font-bold opacity-20')
+                
+                if len(list(self.intel_container)) > 1:
+                    card.move(self.intel_container, target_index=0)
             
-            # Add to activity log too
             self._add_log_entry("RECOGNITION", f"Target identified: {metadata.get('name')}", "orange")
+        else:
+            # If the person was previously inactive (left camera and came back), increment count
+            if not self.intel_is_active.get(aadhar, False):
+                self.intel_counts[aadhar] += 1
+                self.intel_is_active[aadhar] = True # Mark as back in view
+                if aadhar in self.intel_count_labels:
+                    self.intel_count_labels[aadhar].set_text(f"×{self.intel_counts[aadhar]}")
+            
+            # Move to top to indicate recent activity
+            if aadhar in self.intel_elements:
+                try:
+                    self.intel_elements[aadhar].move(self.intel_container, target_index=0)
+                except:
+                    pass
 
     def _cleanup_intel(self):
         now = time.time()
+        # Mark as INACTIVE if not seen for 2 seconds (subject probably left camera)
+        for aadhar, last_t in list(self.intel_last_seen.items()):
+            if now - last_t > 2.0:
+                self.intel_is_active[aadhar] = False
+
         stale = [a for a, t in self.intel_last_seen.items() if now - t > INTEL_CLEANUP_S]
         for aadhar in stale:
             self.intel_last_seen.pop(aadhar)
             self.intel_cards.pop(aadhar)
-            # We don't necessarily remove from container in this view, 
-            # maybe just fade them out or keep a history? 
-            # For this redesign, let's keep the most recent 10.
-            if len(list(self.intel_container)) > 10:
-                self.intel_container.remove(list(self.intel_container)[0])
+            self.intel_counts.pop(aadhar, None)
+            self.intel_is_active.pop(aadhar, None)
+            self.intel_count_labels.pop(aadhar, None)
+            el = self.intel_elements.pop(aadhar, None)
+            if el:
+                try:
+                    self.intel_container.remove(el)
+                except:
+                    pass
         
-        if not self.intel_cards and len(list(self.intel_container)) == 0:
+        if not self.intel_cards and not any(isinstance(child, ui.row) for child in self.intel_container):
             self.no_intel_label.set_visibility(True)
 
     # --- UI Events ---
@@ -699,6 +884,9 @@ class NiceDashboard:
                             ui.label(log.get('date_str')).classes('text-[9px] font-mono opacity-50')
         dialog.open()
 
+# Initialize database
+app.on_startup(init_db)
+
 # Mount the existing streaming server
 app.mount('/api', streaming_app)
 
@@ -742,17 +930,22 @@ async def mjpeg_generator(client_id: str):
         frame = proc.latest_processed_frame
         if frame:
             count += 1
-            if count % 100 == 0:
+            if count <= 5 or count % 100 == 0:
                 print(f"DEBUG: MJPEG Generator — Serving Frame {count} for {client_id} ({len(frame)} bytes)")
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
         await asyncio.sleep(0.04) # ~25 FPS for smoothness
 
-@app.get('/stream/{client_id}')
+@app.get('/stream/{client_id:path}')
 async def stream_endpoint(client_id: str):
     global active_sessions
+    # Safety: unquote in case browser double-encoded or path capture preserved it
+    client_id = urllib.parse.unquote(client_id)
+    print(f"DEBUG: MJPEG Endpoint — Requested CID: {client_id}")
     if client_id not in active_sessions:
+        print(f"DEBUG: MJPEG Endpoint — 404 for {client_id}. Registry: {list(active_sessions.keys())}")
         return Response(status_code=404)
+    print(f"DEBUG: MJPEG Endpoint — Starting stream for {client_id}")
     return StreamingResponse(mjpeg_generator(client_id), media_type='multipart/x-mixed-replace; boundary=frame')
 
 def run_nicegui():

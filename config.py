@@ -32,7 +32,7 @@ MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
 INFERENCE_THROTTLE    = 2      # Run heavy AI every Nth frame (Lower = smoother)
-FACE_MAX_INACTIVE_S   = 2.0    # Seconds before a stale track is pruned
+FACE_MAX_INACTIVE_S   = 1.0    # Refined from 2.0 for better responsiveness
 FACE_TRACK_MAX_DIST   = 150    # Max centroid distance for track matching
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
 MAX_INFERENCE_SIZE    = 320    # Reverted for VRAM stability

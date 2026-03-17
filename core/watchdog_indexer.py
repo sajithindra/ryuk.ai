@@ -249,26 +249,36 @@ class WatchdogIndexer:
             return
 
         loc_key   = f"cache:cam_loc:{client_id}"
-        cached    = cache_str.get(loc_key)
-        if cached:
-            location = cached
+        dev_key   = f"cache:cam_dev:{client_id}"
+        
+        cached_loc = cache_str.get(loc_key)
+        cached_dev = cache_str.get(dev_key)
+        
+        if cached_loc and cached_dev:
+            location = cached_loc
+            device_info = json.loads(cached_dev)
         else:
-            cam      = self._cameras_col.find_one({"client_id": client_id})
-            # Use the first location as the primary name, or default to "Main Terminal"
+            cam = self._cameras_col.find_one({"client_id": client_id})
+            # Locations
             loc_list = cam.get("locations", ["Main Terminal"]) if cam else ["Main Terminal"]
             location = loc_list[0] if loc_list else "Main Terminal"
+            # Device Info
+            device_info = cam.get("device_info", {}) if cam else {}
+            
             cache_str.setex(loc_key, int(CAM_LOC_TTL_S), location)
+            cache_str.setex(dev_key, int(CAM_LOC_TTL_S), json.dumps(device_info))
 
         try:
             self._activity_col.insert_one({
-                "aadhar":    aadhar,
-                "client_id": client_id,
-                "location":  location,
-                "timestamp": datetime.now(),
-                "date_str":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "aadhar":      aadhar,
+                "client_id":   client_id,
+                "location":    location,
+                "device_info": device_info,
+                "timestamp":   datetime.now(),
+                "date_str":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             })
             cache_str.setex(cooldown_key, int(LOG_COOLDOWN_S), "1")
-            print(f"Watchdog: Logged {aadhar} @ {location}")
+            print(f"Watchdog: Logged {aadhar} @ {location} ({device_info.get('device_name','?')})")
         except Exception as e:
             print(f"Watchdog: Log failed — {e}")
 

@@ -29,8 +29,9 @@ class Processor:
       4. Draws the LATEST available face results.
       5. Yields processed JPEG bytes.
     """
-    def __init__(self, client_id: str):
+    def __init__(self, client_id: str, source_url: Optional[str] = None):
         self.client_id = client_id
+        self.source_url = source_url
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.target_size = (640, 480)
@@ -46,10 +47,8 @@ class Processor:
         
         self.latest_processed_frame: Optional[bytes] = None
         
-        # Callback for detections
-        self.on_detection: Optional[Callable[[dict], None]] = None
-        self.on_stream_start: Optional[Callable[[str], None]] = None
-        self.on_inactive: Optional[Callable[[str], None]] = None
+        # Callbacks for detections (Multiple Listeners Support)
+        self.listeners = set() # Set of objects with on_detection, on_stream_start, on_inactive
         
         # Start persistent worker (it will wait for .start() to set running=True)
         self._inf_worker_thread = threading.Thread(target=self._persistent_inf_worker, daemon=True)
@@ -64,31 +63,74 @@ class Processor:
         self.running = False
         # Thread will exit on its next loop iteration. No join needed.
 
+    def add_listener(self, listener):
+        """Register a new UI listener for this processor."""
+        with self._inf_lock:
+            self.listeners.add(listener)
+
+    def remove_listener(self, listener):
+        """Unregister a UI listener."""
+        with self._inf_lock:
+            if listener in self.listeners:
+                self.listeners.remove(listener)
+
     def _run(self):
         last_frame_time = 0.0
         is_active = False
         frame_key = f"stream:{self.client_id}:frame"
+        
+        # Pull model (RTSP) vs Push model (Redis)
+        cap = None
+        grabber_thread = None
+        latest_frame_data = {"frame": None, "lock": threading.Lock(), "running": True}
+
+        if self.source_url:
+            print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream: {self.source_url}")
+            cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
+            if not cap.isOpened():
+                print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM")
+                return
+            
+            # RTSP Optimization: Set buffer size to 1 if supported
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            def grabber():
+                while self.running and latest_frame_data["running"]:
+                    ret, frame = cap.read()
+                    if not ret:
+                        print(f"DEBUG: Processor ({self.client_id}) - RTSP Read Failed. Retrying...")
+                        break
+                    with latest_frame_data["lock"]:
+                        latest_frame_data["frame"] = frame
+            
+            grabber_thread = threading.Thread(target=grabber, daemon=True)
+            grabber_thread.start()
 
         while self.running:
-            raw = cache.get(frame_key)
-
-            if raw:
-                if self._frame_count == 0:
-                    print(f"DEBUG: Processor ({self.client_id}) successfully received first frame from Redis.")
-                now = time.time()
-                if now - last_frame_time < 0.033: # Target stable 30 FPS
-                    continue
-
-                frame = self._decode_frame(raw)
+            frame = None
+            
+            if self.source_url:
+                with latest_frame_data["lock"]:
+                    frame = latest_frame_data["frame"]
+                    latest_frame_data["frame"] = None # Consume the frame
+                
                 if frame is None:
-                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO DECODE FRAME ({len(raw)} bytes)")
+                    time.sleep(0.005) # Small sleep to avoid CPU spinning
                     continue
-
-                last_frame_time = now
+            else:
+                # Original Redis Pull
+                raw = cache.get(frame_key)
+                if raw:
+                    frame = self._decode_frame(raw)
+            
+            if frame is not None:
                 if not is_active:
                     is_active = True
-                    if self.on_stream_start:
-                        self.on_stream_start(self.client_id)
+                    with self._inf_lock:
+                        for l in list(self.listeners):
+                            if hasattr(l, 'on_stream_start'):
+                                print(f"DEBUG: Processor ({self.client_id}) — Notifying listener on_stream_start")
+                                l.on_stream_start(self.client_id)
 
                 self._frame_count = (self._frame_count + 1) % 10_000
                 
@@ -101,11 +143,14 @@ class Processor:
                     with self._inf_lock:
                         self._tracker.predict()
 
-                # Get latest track states (including predictions) for drawing
+                # Get latest track states for drawing (Skip stale ones for real-time responsiveness)
                 faces_to_draw = []
                 with self._inf_lock:
                     for tid, track in list(self._tracker._tracks.items()):
-                        # Use local id_cache if available, otherwise fallback to redis
+                        # Skip if stale even if not yet pruned by background thread
+                        if track.is_stale:
+                            continue
+                            
                         meta = track.id_cache
                         if not meta:
                              _, _, meta = self._get_cached_identity(track)
@@ -117,21 +162,28 @@ class Processor:
                         })
 
                 self._draw_frame(frame, faces_to_draw)
-                self.latest_processed_frame = self._encode_frame(frame)
-                if self.latest_processed_frame is None:
-                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO ENCODE FRAME")
-                elif self._frame_count % 100 == 0:
-                    print(f"DEBUG: Processor ({self.client_id}) - Streaming Active (Frame {self._frame_count})")
-
+                encoded = self._encode_frame(frame)
+                if encoded:
+                    self.latest_processed_frame = encoded
+                
+                last_frame_time = time.time()
             else:
+                # Inactivity logic: Works for both Redis and RTSP
                 if is_active and (time.time() - last_frame_time > 5.0):
                     is_active = False
                     with self._inf_lock:
                         self._tracker.clear()
-                    if self.on_inactive:
-                        print(f"DEBUG: Processor ({self.client_id}) timed out after 5s of no frames.")
-                        self.on_inactive(self.client_id)
+                        for l in list(self.listeners):
+                            if hasattr(l, 'on_inactive'):
+                                print(f"DEBUG: Processor ({self.client_id}) timed out after 5s of no frames.")
+                                l.on_inactive(self.client_id)
                 time.sleep(0.01) # Small sleep only when IDLE
+        
+        latest_frame_data["running"] = False
+        if grabber_thread:
+            grabber_thread.join(timeout=1.0)
+        if cap:
+            cap.release()
 
     def _persistent_inf_worker(self):
         """Persistent worker thread to avoid the overhead of spawning new threads."""
@@ -168,6 +220,38 @@ class Processor:
             scale = 1.0
 
         raw_faces = face_app.get(inf_frame)
+        
+        # New: 180-degree rotation fallback for inverted faces
+        if not raw_faces:
+            # Rotate 180 degrees
+            inf_frame_180 = cv2.rotate(inf_frame, cv2.ROTATE_180)
+            raw_faces_180 = face_app.get(inf_frame_180)
+            
+            if raw_faces_180:
+                # Map coordinates back to original orientation
+                ih, iw = inf_frame.shape[:2]
+                for face in raw_faces_180:
+                    # Bbox: [x1, y1, x2, y2]
+                    x1, y1, x2, y2 = face.bbox
+                    # Inverted mapping: x' = w - x, y' = h - y
+                    new_x1 = iw - x2
+                    new_y1 = ih - y2
+                    new_x2 = iw - x1
+                    new_y2 = ih - y1
+                    face.bbox = np.array([new_x1, new_y1, new_x2, new_y2])
+                    
+                    # Landmarks: [x, y]
+                    if hasattr(face, 'landmark_2d_106') and face.landmark_2d_106 is not None:
+                        face.landmark_2d_106[:, 0] = iw - face.landmark_2d_106[:, 0]
+                        face.landmark_2d_106[:, 1] = ih - face.landmark_2d_106[:, 1]
+                    if hasattr(face, 'landmark_3d_68') and face.landmark_3d_68 is not None:
+                        face.landmark_3d_68[:, 0] = iw - face.landmark_3d_68[:, 0]
+                        face.landmark_3d_68[:, 1] = ih - face.landmark_3d_68[:, 1]
+                    
+                    # Store rotation info if needed (optional)
+                    face.rotated_180 = True
+                
+                raw_faces = raw_faces_180
         
         with self._inf_lock:
             tracked = self._tracker.update(raw_faces, scale)
@@ -225,8 +309,9 @@ class Processor:
 
         res = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD)
         if res and "aadhar" in res:
-            if self.on_detection:
-                self.on_detection(res)
+            for l in list(self.listeners):
+                if hasattr(l, 'on_detection'):
+                    l.on_detection(res)
             # Store in redis cache for other components
             cache_str.set(cache_key, json.dumps(res), ex=int(FACE_CACHE_TTL_S))
             return res.get("name", "Unknown"), res.get("threat_level", "Low"), res
@@ -265,6 +350,15 @@ class Processor:
                 cache_str.set(lock_key, "1", ex=3600)
 
     def _draw_frame(self, frame: np.ndarray, faces: List[Dict]):
+        h, w = frame.shape[:2]
+        # Responsive thickness: on 4k (3840w), thinner than 2 would be invisible.
+        base_thickness = max(1, int(w / 400))
+        
+        # Responsive font scaling: at 1600px width, font_scale is ~1.0
+        font_scale = w / 1600.0
+        font_scale = max(0.4, font_scale)
+        text_thickness = max(1, int(base_thickness / 2))
+
         for pf in faces:
             bbox = pf["bbox"]
             name = pf["name"]
@@ -277,21 +371,32 @@ class Processor:
             else:
                 main_color = (83, 222, 83)    # Safe Green
             text_color = (255, 255, 255)
-            
-            # Fast overlays: LINE_4 (cheaper than LINE_AA) and snap-to-face alpha (handled in tracker)
-            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_4)
+
+            # Draw Bounding Box
+            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, base_thickness, cv2.LINE_4)
             
             label = f" {name.upper()} "
             font = cv2.FONT_HERSHEY_DUPLEX
-            font_scale = 0.4
-            thickness = 1
-            (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
             
-            lx, ly = bbox[0], bbox[1] - 8
-            # Semi-transparent background for label would be nice, but solid is fastest
+            (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+            
+            # Position label: prefer above bbox, flip if off-screen top
+            lx = bbox[0]
+            ly = bbox[1] - base_thickness - 5
+            
+            if ly < th + 5:
+                # If too high, flip inside the box at the top or just below box top
+                ly = bbox[1] + th + base_thickness + 5
+            
+            # Ensure lx + tw doesn't exceed frame width
+            if lx + tw > w:
+                lx = w - tw
+            lx = max(0, lx) # Floor to 0
+
+            # Draw Label Background and Text
             cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), (10, 8, 5), -1)
             cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), main_color, 1, cv2.LINE_4)
-            cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, thickness, cv2.LINE_4)
+            cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, text_thickness, cv2.LINE_4)
 
     def _encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
         try:
@@ -317,8 +422,8 @@ class Processor:
                 # Use NEAREST for 4K -> HD drop to save massive CPU time
                 frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_NEAREST)
 
-            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            frame = cv2.flip(frame, 1)
+            # frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # frame = cv2.flip(frame, 1)
             return frame
         except Exception:
             return None

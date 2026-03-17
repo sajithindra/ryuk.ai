@@ -272,8 +272,8 @@ class VideoProcessor(QThread):
             arr   = np.frombuffer(raw, np.uint8)
             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame is None: return None
-            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            frame = cv2.flip(frame, 1)
+            # frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # frame = cv2.flip(frame, 1)
             return frame
         except Exception:
             return None

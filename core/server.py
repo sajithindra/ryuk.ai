@@ -54,21 +54,39 @@ class StreamingServer:
     # ------------------------------------------------------------------
 
     async def _handle_camera(self, websocket: WebSocket):
-        await websocket.accept()
         host      = websocket.client.host
         port      = websocket.client.port
+        print(f"DEBUG: Connection attempt from {host}:{port}")
+        await websocket.accept()
         client_id = f"{host}:{port}"
-
-        print(f"Camera {client_id} connected.")
+        print(f"DEBUG: Camera {client_id} connected and accepted.")
         cache.sadd("registry:active_streams", client_id)
         new_stream_signals.append(client_id)
+
+        # Extract device details from headers and query params
+        headers = dict(websocket.headers)
+        query_params = dict(websocket.query_params)
+        
+        device_info = {
+            "user_agent": headers.get("user-agent", "Unknown"),
+            "host_header": headers.get("host", "Unknown"),
+            "connection": headers.get("connection", "Unknown"),
+            "platform": headers.get("sec-ch-ua-platform", "Unknown"),
+            "query_params": query_params,
+            "device_name": query_params.get("name", "Unnamed Node")
+        }
 
         # Log connection to MongoDB (async)
         from core.database import cameras_col
         await cameras_col.update_one(
             {"client_id": client_id},
-            {"$set": {"host": host, "port": port,
-                      "last_connected": datetime.now(), "status": "online"}},
+            {"$set": {
+                "host": host, 
+                "port": port,
+                "device_info": device_info,
+                "last_connected": datetime.now(), 
+                "status": "online"
+            }},
             upsert=True,
         )
 
@@ -77,7 +95,7 @@ class StreamingServer:
             while True:
                 data = await websocket.receive_bytes()
                 count += 1
-                if count % 100 == 0:
+                if count <= 5 or count % 100 == 0:
                     print(f"DEBUG: Camera {client_id} — Received frame {count} ({len(data)} bytes)")
                 cache.set(f"stream:{client_id}:frame", data, ex=5)
         except WebSocketDisconnect:
