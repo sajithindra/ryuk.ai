@@ -123,7 +123,13 @@ class WatchdogIndexer:
             return
 
         try:
-            identities = list(self._profiles_col.find({}))
+            # Optimize: Only pull necessary fields for the index mapping
+            projection = {
+                "aadhar": 1, "name": 1, "threat_level": 1, 
+                "phone": 1, "address": 1, "photo_thumb": 1, 
+                "embeddings": 1
+            }
+            identities = list(self._profiles_col.find({}, projection))
         except Exception as e:
             print(f"FAISS: DB query error: {e}")
             return
@@ -220,8 +226,21 @@ class WatchdogIndexer:
             },
             upsert=True,
         )
-        self.update_index()
-        print(f"FAISS: Enrolled {name} (Augmented pose).")
+        
+        # Incremental Index Update
+        norm = np.linalg.norm(embedding)
+        norm_emb = (embedding / norm).astype("float32") if norm > 0 else embedding.astype("float32")
+        
+        if self._faiss_index is None:
+            self.update_index()
+        else:
+            self._faiss_index.add(np.array([norm_emb], dtype="float32"))
+            self._faiss_mapping.append({
+                "aadhar": aadhar, "name": name, "threat_level": threat_level,
+                "phone": phone, "address": address, "photo_thumb": thumb_b64
+            })
+        
+        print(f"FAISS: Enrolled {name} (Incremental update).")
 
     def recognize_face(self, embedding: np.ndarray,
                        threshold: float = FAISS_THRESHOLD) -> dict | None:
@@ -258,15 +277,21 @@ class WatchdogIndexer:
             location = cached_loc
             device_info = json.loads(cached_dev)
         else:
-            cam = self._cameras_col.find_one({"client_id": client_id})
+            # Use projection to minimize data transfer
+            projection = {"locations": 1, "device_info": 1}
+            cam = self._cameras_col.find_one({"client_id": client_id}, projection)
+            
             # Locations
             loc_list = cam.get("locations", ["Main Terminal"]) if cam else ["Main Terminal"]
             location = loc_list[0] if loc_list else "Main Terminal"
             # Device Info
             device_info = cam.get("device_info", {}) if cam else {}
             
-            cache_str.setex(loc_key, int(CAM_LOC_TTL_S), location)
-            cache_str.setex(dev_key, int(CAM_LOC_TTL_S), json.dumps(device_info))
+            # Pipeline metadata caching
+            pipe = cache_str.pipeline()
+            pipe.setex(loc_key, int(CAM_LOC_TTL_S), location)
+            pipe.setex(dev_key, int(CAM_LOC_TTL_S), json.dumps(device_info))
+            pipe.execute()
 
         try:
             self._activity_col.insert_one({
@@ -286,7 +311,8 @@ class WatchdogIndexer:
         if self._profiles_col is None:
             return []
         try:
-            return list(self._profiles_col.find({}))
+            projection = {"embeddings": 0} # Exclude heavy embeddings for general listing
+            return list(self._profiles_col.find({}, projection))
         except Exception:
             return []
 
@@ -312,8 +338,9 @@ class WatchdogIndexer:
             query: dict = {"aadhar": aadhar}
             if days_ago is not None:
                 query["timestamp"] = {"$gte": datetime.now() - timedelta(days=days_ago)}
+            projection = {"_id": 0} # Example projection
             return list(
-                self._activity_col.find(query).sort("timestamp", -1).limit(limit)
+                self._activity_col.find(query, projection).sort("timestamp", -1).limit(limit)
             )
         except Exception as e:
             print(f"Watchdog: Report failed — {e}")
@@ -335,8 +362,20 @@ class WatchdogIndexer:
                 }
             }
         )
-        self.update_index()
-        print(f"Watchdog: Augmented {aadhar} with new pose.")
+        
+        # Incremental Index Update
+        norm = np.linalg.norm(embedding)
+        norm_emb = (embedding / norm).astype("float32") if norm > 0 else embedding.astype("float32")
+        
+        if self._faiss_index is None:
+            self.update_index()
+        else:
+            self._faiss_index.add(np.array([norm_emb], dtype="float32"))
+            # We need to find the meta for this aadhar to keep mapping consistent
+            meta = next((m for m in self._faiss_mapping if m["aadhar"] == aadhar), {"aadhar": aadhar})
+            self._faiss_mapping.append(meta)
+            
+        print(f"Watchdog: Augmented {aadhar} with new pose (Incremental).")
 
     def register_camera_metadata(self, client_id: str, locations: list):
         if self._cameras_col is None:

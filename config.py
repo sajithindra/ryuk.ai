@@ -31,11 +31,11 @@ FAISS_THRESHOLD       = 0.40   # Refined for maximum detection sensitivity
 MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
-INFERENCE_THROTTLE    = 2      # Run heavy AI every Nth frame (Lower = smoother)
+INFERENCE_THROTTLE    = 1      # Set to 1 for maximum GPU utilization
 FACE_MAX_INACTIVE_S   = 1.0    # Refined from 2.0 for better responsiveness
 FACE_TRACK_MAX_DIST   = 150    # Max centroid distance for track matching
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
-MAX_INFERENCE_SIZE    = 320    # Reverted for VRAM stability
+MAX_INFERENCE_SIZE    = 640    # High-quality detection for GPU
 
 # ---------------------------------------------------------------------------
 # Redis TTLs & cooldowns
@@ -50,6 +50,22 @@ CAM_LOC_TTL_S     = 3600  # Cache camera location metadata for N seconds
 # ---------------------------------------------------------------------------
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
+
+# ---------------------------------------------------------------------------
+# RTSP & Video Processing
+# ---------------------------------------------------------------------------
+RTSP_TRANSPORT = "tcp"  # Use TCP for more reliable delivery and lower jitter
+USE_FFMPEG_CUDA = True  # Set to True to force GPU decoding via FFmpeg sub-process (NVDEC)
+RTSP_LOW_LATENCY_FLAGS = [
+    "fflags+nobuffer",
+    "fflags+igndts",
+    "flags+low_delay",
+    "strict+experimental",
+    "rtsp_transport+tcp",
+]
+VIDEO_JPEG_QUALITY = 85
+VIDEO_DRAW_THICKNESS_SCALE = 400
+VIDEO_FONT_SCALE_BASE = 1600.0
 
 # ---------------------------------------------------------------------------
 # UI

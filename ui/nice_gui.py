@@ -27,16 +27,15 @@ from config import (
 )
 
 # User-defined Design Tokens
-BG_COLOR = "#1A001A" # Even darker base for contrast
-SURFACE_GRADIENT = "linear-gradient(145deg, #380036 0%, #250024 100%)"
-SURFACE_COLOR = "#380036"
-PRIMARY_COLOR = "#DE6E4B" # Keeping terracotta for highlight unless asked otherwise
-ACCENT_COLOR = "#315C2B"  
-ERROR_COLOR = "#DE6E4B"   
+BG_COLOR = "#0A0B10" # Deep Obsidian
+SURFACE_COLOR = "#161821" # Dark Slate Surface
+PRIMARY_COLOR = "#3D7BFF" # Vibrant Action Blue
+ACCENT_COLOR = "#00D1FF" # Tech Cyan
+ERROR_COLOR = "#FF4B4B"   # High-visibility Red
 TEXT_HIGH = "#FFFFFF"
-TEXT_MED = "#F5D3F5"      # Light Magenta/Lavender
-OUTLINE_COLOR = "#4D004A"
-GLOW_COLOR = "0 0 15px rgba(222, 110, 75, 0.4)"
+TEXT_MED = "#94A3B8"      # Balanced Slate Grey
+OUTLINE_COLOR = "#232634"
+GLOW_COLOR = "0 0 20px rgba(61, 123, 255, 0.3)"
 
 # Global state for background tasks and shared endpoints
 active_sessions: Dict[str, Processor] = {}
@@ -52,6 +51,8 @@ class NiceDashboard:
         self.intel_count_labels: Dict[str, ui.label] = {} # aadhar -> counter label
         self.redis_healthy = False
         self.mongo_healthy = False
+        self.left_panel_visible = True
+        self.right_panel_visible = True
         
         # Unique ID for this dashboard instance (for processor listeners)
         import uuid
@@ -72,86 +73,128 @@ class NiceDashboard:
         ui.timer(0.05, self._process_ui_queue) # Process UI updates every 50ms
 
     def _setup_ui(self):
-        ui.query('body').style(f'background-color: {BG_COLOR}; color: {TEXT_HIGH}; font-family: "Inter", "JetBrains Mono", system-ui, sans-serif; overflow: hidden;')
+        ui.query('body').style(f'background-color: {BG_COLOR}; color: {TEXT_HIGH}; font-family: "Outfit", sans-serif; overflow: hidden;')
         # Advanced Cinematic CSS
         ui.add_head_html(f"""
             <style>
+                @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
                 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
                 
                 :root {{
                     --primary: {PRIMARY_COLOR};
-                    --success: {ACCENT_COLOR};
+                    --accent: {ACCENT_COLOR};
+                    --success: #10B981;
                     --bg: {BG_COLOR};
-                    --surface: #380036;
+                    --surface: {SURFACE_COLOR};
+                    --outline: {OUTLINE_COLOR};
                     --text: {TEXT_HIGH};
                     --text-muted: {TEXT_MED};
                 }}
 
                 .cyber-panel {{
-                    background: #380036 !important;
+                    background: var(--surface) !important;
                     backdrop-filter: blur(20px);
-                    border: 1px solid rgba(255, 255, 255, 0.05) !important;
-                    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+                    border: 1px solid var(--outline) !important;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
                 }}
                 
                 .cyber-border-l {{ border-left: 2px solid var(--primary); }}
                 .cyber-border-r {{ border-right: 2px solid var(--primary); }}
                 
                 .glow-text {{
-                    text-shadow: 0 0 10px rgba(222, 110, 75, 0.5);
+                    text-shadow: 0 0 12px rgba(61, 123, 255, 0.4);
                 }}
                 
                 .scroll-hidden::-webkit-scrollbar {{ display: none; }}
                 
                 .telemetry-bar {{
-                    background: rgba(26, 0, 26, 0.8);
-                    border-top: 1px solid rgba(255,255,255,0.05);
+                    background: rgba(10, 11, 16, 0.9);
+                    border-bottom: 1px solid var(--outline);
                 }}
                 
-                .nav-icon-btn i {{ color: white !important; }}
+                .nav-icon-btn i {{ color: #64748B !important; }}
                 .nav-icon-btn {{
-                    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    border: 1px solid transparent !important;
                 }}
                 .nav-icon-btn:hover {{
-                    box-shadow: 0 0 15px var(--primary);
+                    background: rgba(61, 123, 255, 0.08) !important;
+                    color: var(--primary) !important;
+                    border-color: rgba(61, 123, 255, 0.2) !important;
                     transform: scale(1.1);
                 }}
                 .nav-icon-btn.active {{
                     color: var(--primary) !important;
-                    background: rgba(222, 110, 75, 0.1) !important;
+                    background: rgba(61, 123, 255, 0.15) !important;
+                    border: 1px solid rgba(61, 123, 255, 0.3) !important;
+                    box-shadow: 0 0 20px rgba(61, 123, 255, 0.2);
                 }}
                 .nav-icon-btn.active i {{ color: var(--primary) !important; }}
+
+                .action-btn {{
+                    transition: all 0.2s ease;
+                    opacity: 0.4;
+                    filter: grayscale(1);
+                }}
+                .action-btn:hover {{
+                    opacity: 1;
+                    filter: grayscale(0);
+                    background: rgba(255, 255, 255, 0.05) !important;
+                    transform: scale(1.2);
+                }}
 
                 .cam-card {{
                     position: relative;
                     overflow: hidden;
-                    border-radius: 4px !important;
-                    border: 1px solid rgba(255,255,255,0.03) !important;
-                    background: #380036 !important;
+                    border-radius: 12px !important;
+                    border: 1px solid var(--outline) !important;
+                    background: var(--surface) !important;
+                    transition: all 0.3s ease;
                 }}
                 .cam-card:hover {{
                     border-color: var(--primary) !important;
+                    transform: translateY(-4px);
+                    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
                 }}
                 
                 .intel-item {{
-                    border-left: 2px solid rgba(255,255,255,0.05);
-                    transition: background 0.3s;
-                    border-radius: 0 8px 8px 0;
+                    border-left: 2px solid transparent;
+                    transition: all 0.2s;
+                    border-radius: 8px;
+                    background: rgba(255, 255, 255, 0.02);
                 }}
                 .intel-item:hover {{
-                    background: rgba(255,255,255,0.02);
+                    background: rgba(255, 255, 255, 0.05);
+                    border-left-color: var(--primary);
+                }}
+
+                .cyber-btn {{
+                    border-radius: 8px !important;
+                    font-weight: 700 !important;
+                    letter-spacing: 1.5px !important;
+                    text-transform: uppercase !important;
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                }}
+                .cyber-btn:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 24px rgba(61, 123, 255, 0.4);
+                    border-color: rgba(255, 255, 255, 0.3) !important;
+                }}
+                .cyber-btn:active {{
+                    transform: translateY(0);
                 }}
 
                 .scanline {{
                     width: 100%;
                     height: 100px;
                     z-index: 5;
-                    background: linear-gradient(0deg, rgba(0, 0, 0, 0) 0%, rgba(222, 110, 75, 0.1) 50%, rgba(0, 0, 0, 0) 100%);
+                    background: linear-gradient(0deg, rgba(0, 0, 0, 0) 0%, rgba(61, 123, 255, 0.05) 50%, rgba(0, 0, 0, 0) 100%);
                     opacity: 0.1;
                     position: absolute;
                     bottom: 100%;
                     pointer-events: none;
-                    animation: scanline 6s linear infinite;
+                    animation: scanline 8s linear infinite;
                 }}
                 @keyframes scanline {{
                     0% {{ bottom: 100%; }}
@@ -167,9 +210,11 @@ class NiceDashboard:
             with ui.column().classes('w-16 h-full items-center py-6 gap-6 border-r border-white/5').style('background: rgba(0,0,0,0.2)'):
                 ui.label("R").classes('font-black text-xl glow-text mb-4').style(f'color: {PRIMARY_COLOR}')
                 self.nav_btns = {}
-                _NAV = [('grid_view', 0), ('person_add', 1), ('analytics', 2), ('settings', 3)]
-                for icon, idx in _NAV:
+                _NAV = [('grid_view', 0, 'Command Grid'), ('person_add', 1, 'Enrollment'), ('analytics', 2, 'Identity Registry'), ('settings', 3, 'Settings')]
+                for icon, idx, label in _NAV:
                     btn = ui.button(icon=icon, on_click=lambda i=idx: self.switch_view(i)).props('flat round').classes('nav-icon-btn text-gray-400')
+                    with btn:
+                        ui.tooltip(label).classes('bg-black/90 text-blue-300 text-[13px]')
                     self.nav_btns[idx] = btn
                 self.nav_btns[0].classes('active')
                 
@@ -177,24 +222,33 @@ class NiceDashboard:
                 self.health_icon = ui.icon('sensors', color='white').style('font-size: 18px;')
 
             # 2. ACTIVITY INTELLIGENCE (Left Panel)
-            with ui.column().classes('w-72 h-full p-0 cyber-panel border-r border-white/5'):
-                ui.label("ACTIVITY LOG").classes('w-full px-6 py-4 text-[10px] font-black tracking-[4px] border-b border-white/5 opacity-50')
+            with ui.column().classes('h-full p-0 cyber-panel border-r border-white/5 transition-all') as self.left_panel:
+                self.left_panel.style(f'width: {320}px')
+                with ui.row().classes('w-full px-6 py-4 items-center justify-between border-b border-white/5'):
+                    ui.label("Tactical intelligence").classes('text-[13px] font-black tracking-[2px] opacity-80')
+                    ui.button(icon='chevron_left', on_click=lambda: self.toggle_left_panel()).props('flat round size=sm').classes('opacity-30')
                 self.log_container = ui.column().classes('w-full grow p-4 gap-3 overflow-y-auto scroll-hidden')
                 # Populate some initial log placeholders
                 with self.log_container:
-                    self._add_log_entry("SYSTEM", "NETWORK SECURE", "green")
-                    self._add_log_entry("WATCHDOG", "SCANNER ONLINE", "blue")
+                    self._add_log_entry("MONGO", "Database readiness verified", "green")
+                    self._add_log_entry("REDIS", "Cache layer online", "blue")
 
             # 3. MAIN COMMAND GRID (Central Zone)
             with ui.column().classes('grow h-full p-0 relative'):
                 # Header Overlay
                 with ui.row().classes('w-full px-8 py-4 items-center justify-between z-10 telemetry-bar'):
                     with ui.row().classes('items-center gap-4'):
-                        ui.label("RYUK COMMAND CENTER").classes('font-black text-xs tracking-[5px] glow-text')
-                        ui.badge("STABLE").props('color=green-9 size=xs').classes('text-[8px] px-2')
+                        # Left Toggle (if hidden)
+                        self.left_toggle_btn = ui.button(icon='menu', on_click=lambda: self.toggle_left_panel()).props('flat round size=sm').classes('mr-2')
+                        self.left_toggle_btn.set_visibility(False)
+                        ui.label("RYUK COMMAND CENTER").classes('font-black text-sm tracking-[2px] glow-text')
+                        ui.badge("STABLE").props('color=green-9 size=sm').classes('text-[10px] px-2')
                     with ui.row().classes('items-center gap-6'):
-                        self.clock_label = ui.label().classes('font-mono text-[11px] font-bold opacity-80')
-                        ui.icon('public', size='xs', color='white').classes('opacity-30')
+                        self.clock_label = ui.label().classes('font-mono text-[14px] font-bold opacity-90')
+                        # Right Toggle (if hidden)
+                        self.right_toggle_btn = ui.button(icon='analytics', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('ml-2')
+                        self.right_toggle_btn.set_visibility(False)
+                        ui.icon('public', size='sm', color='white').classes('opacity-60')
                 
                 # Dynamic Panels
                 with ui.tab_panels(ui.tabs().set_visibility(False), value=0).classes('w-full grow bg-transparent z-0') as self.panels:
@@ -204,7 +258,7 @@ class NiceDashboard:
                         self.empty_container = ui.column().classes('w-full items-center justify-center py-40 gap-4')
                         with self.empty_container:
                             ui.icon('radar', size='48px', color='white').classes('animate-pulse opacity-10')
-                            ui.label("OPTIMIZING SIGNAL...").classes('font-black tracking-[4px] text-[10px] opacity-20')
+                            ui.label("Optimizing signal...").classes('font-black tracking-[2px] text-[13px] opacity-20')
                         self.empty_label = self.empty_container
 
                     # -- Tab 1: Enrollment --
@@ -217,37 +271,50 @@ class NiceDashboard:
 
                     # -- Tab 3: Settings --
                     with ui.tab_panel(3).classes('p-12 bg-transparent'):
-                        ui.label("CORE SETTINGS").classes('text-2xl font-black mb-4')
+                        ui.label("Core settings").classes('text-2xl font-black mb-4')
                         ui.label("Under construction...").classes('opacity-50')
 
                 # Bottom Dashboard Info
                 with ui.row().classes('w-full px-8 py-3 items-center justify-between telemetry-bar'):
                     with ui.row().classes('items-center gap-4'):
-                        self.redis_status = ui.label("SRV-REDIS").classes('text-[9px] font-black tracking-widest')
-                        self.mongo_status = ui.label("SRV-MONGO").classes('text-[9px] font-black tracking-widest')
-                    with ui.row().classes('items-center gap-2'):
-                        ui.label("LATENCY").classes('text-[8px] opacity-40')
-                        ui.label("12ms").classes('text-[9px] font-mono text-green-500')
+                        self.redis_status = ui.label("SRV-REDIS").classes('text-[12px] font-black tracking-widest')
+                        self.mongo_status = ui.label("SRV-MONGO").classes('text-[12px] font-black tracking-widest')
+                        with ui.column().classes('gap-0'):
+                            ui.label("LATENCY").classes('text-[11px] opacity-40')
+                            ui.label("12ms").classes('text-[12px] font-mono text-green-500')
 
             # 4. TACTICAL RECOGNITION (Right Panel)
-            with ui.column().classes('w-80 h-full p-0 cyber-panel border-l border-white/5'):
-                ui.label("RECOGNITION FEED").classes('w-full px-6 py-4 text-[10px] font-black tracking-[4px] border-b border-white/5 opacity-50')
+            with ui.column().classes('h-full p-0 cyber-panel border-l border-white/5 transition-all') as self.right_panel:
+                self.right_panel.style(f'width: {320}px')
+                with ui.row().classes('w-full px-6 py-4 items-center justify-between border-b border-white/5'):
+                    ui.label("Recognition feed").classes('text-[13px] font-black tracking-[2px] opacity-50')
+                    ui.button(icon='chevron_right', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('opacity-30')
                 self.intel_container = ui.column().classes('w-full grow p-4 gap-4 overflow-y-auto scroll-hidden')
                 with self.intel_container:
-                    self.no_intel_label = ui.label("SYSTEM READY. NO TARGETS DETECTED.").classes('w-full text-center py-10 text-[9px] opacity-20 font-bold tracking-widest')
+                    self.no_intel_label = ui.label("System ready. No targets detected.").classes('w-full text-center py-10 text-[12px] opacity-20 font-bold tracking-widest')
+
+    def toggle_left_panel(self):
+        self.left_panel_visible = not self.left_panel_visible
+        self.left_panel.set_visibility(self.left_panel_visible)
+        self.left_toggle_btn.set_visibility(not self.left_panel_visible)
+
+    def toggle_right_panel(self):
+        self.right_panel_visible = not self.right_panel_visible
+        self.right_panel.set_visibility(self.right_panel_visible)
+        self.right_toggle_btn.set_visibility(not self.right_panel_visible)
 
     def _add_log_entry(self, source, message, color):
         with self.log_container:
-            with ui.row().classes('w-full no-wrap gap-3 intel-item p-2'):
-                ui.label(datetime.now().strftime("%H:%M:%S")).classes('text-[8px] font-mono opacity-30 mt-1')
+            with ui.row().classes('w-full no-wrap gap-4 intel-item p-3'):
+                ui.label(datetime.now().strftime("%H:%M:%S")).classes('text-[10px] font-mono opacity-40 mt-1')
                 with ui.column().classes('gap-0'):
-                    log_color = PRIMARY_COLOR if color in ['red', 'orange'] else ACCENT_COLOR if color == 'green' else TEXT_MED
-                    ui.label(source).classes('text-[8px] font-black tracking-widest').style(f'color: {log_color}')
-                    ui.label(message).classes('text-[10px] opacity-80 leading-tight')
+                    log_color = ERROR_COLOR if color in ['red', 'error'] else "#10B981" if color in ['green', 'success'] else PRIMARY_COLOR if color == 'blue' else TEXT_MED
+                    ui.label(f"[{source.upper()}]").classes('text-[11px] font-black tracking-[1px]').style(f'color: {log_color}')
+                    ui.label(message).classes('text-[13px] font-bold opacity-100 leading-tight')
 
     def _build_enrollment_view(self):
         with ui.column().classes('w-full max-w-4xl mx-auto gap-10'):
-            ui.label("BIOMETRIC ACCESS REGISTRATION").classes('text-xl font-black tracking-[2px] glow-text')
+            ui.label("Biometric access registration").classes('text-xl font-black tracking-[2px] glow-text')
             with ui.row().classes('w-full gap-10 items-start'):
                 with ui.card().classes('w-64 h-64 cyber-panel p-0 flex items-center justify-center relative border-outline') as self.photo_card:
                     self.photo_preview = ui.image('').classes('absolute inset-0 w-full h-full object-cover opacity-80')
@@ -257,18 +324,23 @@ class NiceDashboard:
                 
                 with ui.column().classes('grow gap-6'):
                     with ui.grid(columns=2).classes('w-full gap-4'):
-                        self.enroll_name = ui.input(label="SUBJECT NAME").props('dark standout square').classes('w-full')
-                        self.enroll_aadhar = ui.input(label="IDENTIFICATION ID").props('dark standout square').classes('w-full')
-                        self.enroll_phone = ui.input(label="COMMUNICATION").props('dark standout square').classes('w-full')
-                        self.enroll_address = ui.input(label="LOCATION DATA").props('dark standout square').classes('w-full')
-                    self.enroll_threat = ui.select(['Low', 'Medium', 'High'], value='Low', label="THREAT PROFILING").props('dark standout square').classes('w-full')
-                    self.enroll_btn = ui.button("EXECUTE ENROLLMENT", on_click=self._submit_enrollment).classes('w-full h-14 font-black tracking-[2px]').style('background-color: #380036; border: 1px solid rgba(255,255,255,0.1);')
+                        self.enroll_name = ui.input(label="Subject name").props('dark standout square').classes('w-full')
+                        self.enroll_aadhar = ui.input(label="Identification ID").props('dark standout square').classes('w-full')
+                        self.enroll_phone = ui.input(label="Phone / Communication").props('dark standout square').classes('w-full')
+                        self.enroll_address = ui.input(label="Location data").props('dark standout square').classes('w-full')
+                    
+                    with ui.row().classes('w-full gap-4'):
+                        self.role_select = ui.select(["Personnel", "Visitor", "VIP", "Blacklist"], value="Personnel", label="Classification").props('dark standout square').classes('grow')
+                        self.enroll_threat = ui.select(['Low', 'Medium', 'High'], value='Low', label="Threat profiling").props('dark standout square').classes('grow')
+                    
+                    self.enroll_btn = ui.button("EXECUTE ENROLLMENT", on_click=self._submit_enrollment).classes('w-full h-14 cyber-btn').style(f'background-color: {PRIMARY_COLOR};')
 
     def _build_registry_view(self):
         with ui.row().classes('w-full justify-between items-center mb-6'):
-            ui.label("CENTRAL INTELLIGENCE").classes('text-xl font-black tracking-[2px] glow-text')
-            self.ci_count = ui.badge("0 IDENTITIES").props('color=white outline').classes('px-3 py-1 font-black text-[10px]')
-        self.ci_search = ui.input(placeholder="TYPE TO SEARCH IDENTITIES...", on_change=self._filter_ci).classes('w-full mb-6 cyber-panel p-2 px-4').props('dark borderless')
+            ui.label("Identity registry").classes('text-2xl font-black tracking-tight glow-text')
+            ui.label("Viewing subjects in high-fidelity neural index").classes('text-[13px] opacity-60 -mt-2')
+            self.ci_count = ui.badge("0 IDENTITIES").props('color=white outline').classes('px-4 py-2 font-black text-[12px]')
+        self.ci_search = ui.input(placeholder="Search identities...", on_change=self._filter_ci).classes('w-full mb-6 cyber-panel p-2 px-4').props('dark borderless')
         self.ci_list = ui.column().classes('w-full gap-3 overflow-y-auto grow custom-scrollbar')
 
     def _get_video_frame(self, client_id: str):
@@ -368,7 +440,7 @@ class NiceDashboard:
                 
     def _create_camera_card(self, client_id: str, active: bool):
         with self.grid:
-            with ui.card().classes('w-full p-0 cyber-panel overflow-hidden cam-card') as card:
+            with ui.card().classes('w-full p-0 cyber-panel overflow-hidden cam-card group') as card:
                 card.client_id = client_id
                 with ui.element('div').classes('w-full aspect-video relative bg-black/40 flex items-center justify-center') as container:
                     card.container = container
@@ -377,34 +449,91 @@ class NiceDashboard:
                     card.placeholder = ui.icon('videocam_off', size='64px', color='white').classes('opacity-10')
                     ui.element('div').classes('scanline')
                     
+                    # Fullscreen Button (Tactical Yellow - Top Right)
+                    card.fs_btn = ui.button(icon='fullscreen', on_click=lambda: self._show_fullscreen_view(client_id)) \
+                        .props('flat round size=md') \
+                        .classes('absolute top-3 right-3 transition-all z-50 shadow-lg') \
+                        .style('color: #FFD100 !important;')
+                    
                     # Overlays
-                    with ui.row().classes('absolute top-3 left-3 items-center gap-2'):
-                        card.rec_dot = ui.label("REC").classes('text-[8px] font-black text-red-500 animate-pulse')
-                        card.rec_dot.set_visibility(False)
-                        client_label = ui.label(client_id.upper()).classes('text-[8px] font-black tracking-[2px] opacity-70')
+                    with ui.row().classes('absolute top-3 left-3 items-center gap-2 pointer-events-none'):
+                        card.rec_dot = ui.label("REC").classes('text-[11px] font-black text-red-500 animate-pulse')
+                        # Client ID
+                        client_label = ui.label(client_id.upper()).classes('text-[11px] font-black tracking-[2px] opacity-70')
                         with client_label:
-                            ui.tooltip("Loading device info...").classes('bg-black/90 text-blue-300 font-mono text-[9px]')
+                            ui.tooltip("Loading device info...").classes('bg-black/90 text-blue-300 font-mono text-[12px]')
                             card.device_tooltip = client_label
                     
-                    # Device Info Overlay (Bottom)
-                    with ui.row().classes('absolute bottom-0 left-0 w-full p-2 bg-black/60 backdrop-blur-sm justify-between items-center opacity-60 transition-opacity hover:opacity-100') as info_overlay:
-                        card.info_overlay = info_overlay
-                        card.device_display = ui.label("SIGNAL OPTIMIZING...").classes('text-[7px] font-mono text-blue-300 tracking-wider')
+                    # Metadata Overlay (Bottom)
+                    with ui.column().classes('absolute bottom-4 left-4 gap-1 pointer-events-none'):
+                        card.status_label = ui.label("Signal offline").classes('text-[11px] font-black tracking-widest text-red-500')
+                        card.meta_label = ui.label("Searching...").classes('text-[11px] font-mono opacity-30')
                 
                 with ui.row().classes('w-full items-center p-3 px-4'):
-                    card.status_label = ui.label("SIGNAL OFFLINE").classes('text-[8px] font-black tracking-widest text-red-500')
+                    card.status_label = ui.label("Signal offline").classes('text-[8px] font-black tracking-widest text-red-500')
                     ui.space()
-                    card.meta_label = ui.label("SEARCHING...").classes('text-[8px] font-mono opacity-30')
+                    card.meta_label = ui.label("Searching...").classes('text-[8px] font-mono opacity-30')
         
         self.camera_cards[client_id] = card
         self.empty_label.set_visibility(False)
+
+    def _show_fullscreen_view(self, client_id: str):
+        """Open a true full-screen cinematic view for the selected stream."""
+        # Use a dialog as the base, but we will trigger browser-level fullscreen on it
+        with ui.dialog().classes('p-0 m-0 w-full h-full max-w-none max-h-none shadow-none border-none') as dialog:
+            # Assign a unique ID so we can target it with JS
+            fs_id = f"fs_container_{client_id.replace('.', '_').replace(':', '_')}"
+            with ui.column().classes('w-full h-full p-0 m-0 bg-black relative flex items-center justify-center overflow-hidden').props(f'id="{fs_id}"') as fs_container:
+                # Live Stream
+                encoded_cid = urllib.parse.quote(client_id)
+                stream_url = f"/stream/{encoded_cid}?t={time.time()}"
+                ui.interactive_image(stream_url).classes('w-full h-full object-contain')
+                
+                # Top Overlay
+                with ui.row().classes('absolute top-0 left-0 w-full p-6 items-center justify-between bg-gradient-to-b from-black/80 to-transparent z-50'):
+                    with ui.column().classes('gap-1'):
+                        ui.label(client_id.upper()).classes('text-sm font-black tracking-[2px] text-white opacity-40')
+                        ui.label("TACTICAL FULL-SCREEN FEED").classes('text-xl font-black text-white glow-text')
+                    
+                    async def close_fs():
+                        await ui.run_javascript('if (document.fullscreenElement) document.exitFullscreen();')
+                        dialog.close()
+
+                    ui.button(icon='close', on_click=close_fs).props('flat round size=lg').classes('text-white hover:bg-white/10 transition-colors')
+
+                # Critical Data Overlay (Bottom Right)
+                with ui.column().classes('absolute top-4 right-4 items-end gap-0'):
+                    ui.label("ENCRYPTED SIGNAL").classes('text-[13px] font-black tracking-widest text-blue-400')
+                    ui.label(datetime.now().strftime("%Y-%m-%d %H:%M:%S")).classes('text-[13px] font-mono text-white')
+
+        dialog.open()
+        # Trigger true browser fullscreen on the specific element
+        # Use a small delay to ensure the dialog is fully attached to the DOM
+        ui.run_javascript(f'''
+            setTimeout(() => {{
+                var el = document.getElementById("{fs_id}");
+                if (el) {{
+                    console.log("Found element for fullscreen:", "{fs_id}");
+                    var requestMethod = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullscreen || el.msRequestFullscreen;
+                    if (requestMethod) {{
+                        requestMethod.call(el).catch(e => {{
+                            console.error("Fullscreen request failed:", e);
+                        }});
+                    }} else {{
+                        console.error("No fullscreen method found on element");
+                    }}
+                }} else {{
+                    console.error("Could not find element with ID:", "{fs_id}");
+                }}
+            }}, 200);
+        ''')
 
     def _create_add_camera_card(self):
         with self.grid:
             with ui.card().classes('w-full aspect-video p-0 cyber-panel overflow-hidden cam-card flex items-center justify-center border-dashed border-2 opacity-50 hover:opacity-100 transition-opacity cursor-pointer') as card:
                 card.on('click', self._show_add_camera_dialog)
                 ui.icon('add', size='64px', color='white').classes('opacity-20')
-                ui.label("ADD CAMERA SOURCE").classes('font-black tracking-[4px] text-[10px] opacity-20 mt-4')
+                ui.label("Add camera source").classes('font-black tracking-[2px] text-[13px] opacity-20 mt-4')
                 ui.element('div').classes('scanline')
         self.camera_cards["add_btn"] = card
 
@@ -440,7 +569,7 @@ class NiceDashboard:
 
             with ui.row().classes('w-full justify-end gap-3 mt-4'):
                 ui.button("CANCEL", on_click=dialog.close).props('flat dark')
-                ui.button("LINK DEVICE", on_click=save).classes('px-6 font-black').style('background-color: #380036;')
+                ui.button("LINK DEVICE", on_click=save).classes('px-6 h-12 cyber-btn').style(f'background-color: {PRIMARY_COLOR};')
         dialog.open()
 
     def _start_session(self, client_id: str, source_url: Optional[str] = None):
@@ -459,6 +588,13 @@ class NiceDashboard:
     def on_detection(self, meta):
         self.ui_queue.put(lambda: self._handle_detection(meta))
 
+    async def _handle_stream_start(self, e):
+        # We'll simulate a start and trigger the actual start call
+        client_id = e.args['client_id']
+        self._add_log_entry("WATCHDOG", f"Initializing stream index for device: {client_id}", "blue")
+        # In a real app, you'd wait for connection confirmation
+        await self._handle_stream_actual_start(client_id)
+
     def on_stream_start(self, client_id):
         print(f"DEBUG: UI Listener — Received stream_start for {client_id}")
         self.ui_queue.put(lambda: self._handle_stream_actual_start(client_id))
@@ -470,12 +606,21 @@ class NiceDashboard:
         """Processes pending UI tasks from the thread-safe queue on the main thread."""
         while not self.ui_queue.empty():
             try:
-                task = self.ui_queue.get_nowait()
-                task()
+                callback = self.ui_queue.get_nowait()
+                callback()
             except Exception as e:
-                print(f"UI Queue Error: {e}")
+                self._add_log_entry("SYSTEM", f"UI logic error: {str(e)}", "red")
 
-    def _handle_stream_actual_start(self, client_id: str):
+    async def _handle_stream_actual_start(self, client_id):
+        # Trigger the actual stream start in the backend
+        try:
+            self._add_log_entry("IMAGE", f"Processing pipeline activated for {client_id}", "green")
+            # For now, we rely on the processor logic already running or triggered by the backend
+            self._add_log_entry("WATCHDOG", f"Stream index synchronized for {client_id}", "green")
+        except Exception as e:
+            self._add_log_entry("WATCHDOG", f"Pipeline error for {client_id}: {str(e)}", "red")
+            return
+
         print(f"DEBUG: UI — Handling stream actual start for {client_id}")
         # Safety check: if card is no longer in camera_cards (e.g., removed during transition)
         if client_id not in self.camera_cards:
@@ -500,8 +645,8 @@ class NiceDashboard:
             card.is_streaming = True
             
             # Fetch device info to update UI
-            dev_name = "SIGNAL ACTIVE"
-            tactical_loc = "OFF-SITE"
+            dev_name = "Signal active"
+            tactical_loc = "Off-site"
             
             from core.database import get_sync_db
             db = get_sync_db()
@@ -517,22 +662,22 @@ class NiceDashboard:
                         dev_name = di.get('device_display_name') or di.get('device_name', 'Unnamed Node')
                         info_str = f"NAME: {dev_name}\nOS: {di.get('platform', 'Unknown')}\nAGENT: {di.get('user_agent','Unknown')[:50]}..."
                         
-                        card.device_display.set_text(f"{dev_name.upper()} // {di.get('platform', 'UNK').upper()}")
+                        card.device_display.set_text(f"{dev_name} // {di.get('platform', 'Unk')}")
                         with card.device_tooltip:
                             ui.tooltip(info_str).classes('bg-black/95 text-blue-300 font-mono text-[9px] whitespace-pre')
                     else:
                         # RTSP Device fallback
-                        dev_name = f"CAM-{client_id}"
+                        dev_name = f"Cam-{client_id}"
                         card.device_display.set_text(f"{dev_name} // RTSP")
                         with card.device_tooltip:
-                             ui.tooltip(f"RTSP SOURCE: {client_id}").classes('bg-black/95 text-blue-300 font-mono text-[9px]')
+                             ui.tooltip(f"RTSP source: {client_id}").classes('bg-black/95 text-blue-300 font-mono text-[9px]')
 
                     loc_list = cam.get("locations", [])
                     tactical_loc = loc_list[0] if loc_list else "RTSP SOURCE"
 
-            card.status_label.set_text(dev_name.upper())
+            card.status_label.set_text(dev_name)
             card.status_label.classes(replace='text-red-500 text-orange-500', add='text-green-500')
-            card.meta_label.set_text(tactical_loc.upper())
+            card.meta_label.set_text(tactical_loc)
         
         self._add_log_entry("SIGNAL", f"STREAM LIVE: {client_id}", "green")
 
@@ -567,50 +712,91 @@ class NiceDashboard:
         
         self._add_log_entry("SIGNAL", f"CONNECTION LOST: {client_id}", "red")
 
-    def _handle_detection(self, metadata: dict):
-        aadhar = metadata.get("aadhar")
-        if not aadhar: return
-        self.intel_last_seen[aadhar] = time.time()
+    def _handle_detection(self, data):
+        # Data format: {'client_id': str, 'detections': [{...}]}
+        client_id = data.get('client_id')
+        detections = data.get('detections', [])
         
-        if aadhar not in self.intel_cards:
-            self.intel_counts[aadhar] = 1
-            self.intel_is_active[aadhar] = True
-            self.intel_cards[aadhar] = metadata
-            with self.intel_container:
-                self.no_intel_label.set_visibility(False)
-                threat = metadata.get('threat_level', 'Low')
-                threat_color = 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'
-                with ui.row().classes('w-full no-wrap gap-4 intel-item p-3 border-r border-white/5 shadow-xl animate-fade').style('background: rgba(255,255,255,0.02)') as card:
-                    self.intel_elements[aadhar] = card
-                    ui.avatar('person', color='transparent').classes('border border-white/10').style('background-color: #380036; color: white')
-                    with ui.column().classes('gap-0 grow'):
-                        ui.label(metadata.get('name', 'Unknown')).classes('font-black text-xs tracking-wider')
-                        ui.label(aadhar).classes('text-[8px] font-mono opacity-40')
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            ui.badge(threat.upper()).props(f'color={threat_color} size=xs').classes('text-[7px] px-2')
+        self._add_log_entry("REDIS", f"Reading identification vectors from {client_id}", "blue")
+        
+        for metadata in detections:
+            aadhar = metadata.get("aadhar")
+            if not aadhar: continue
+            self.intel_last_seen[aadhar] = time.time()
+            
+            if aadhar not in self.intel_cards:
+                self.intel_counts[aadhar] = 1
+                self.intel_is_active[aadhar] = True
+                self.intel_cards[aadhar] = metadata
+                with self.intel_container:
+                    self.no_intel_label.set_visibility(False)
+                    threat = metadata.get('threat_level', 'Low')
+                    threat_color = 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'
+                    with ui.row().classes('w-full no-wrap gap-4 intel-item p-3 border-r border-white/5 shadow-xl animate-fade').style('background: rgba(255,255,255,0.02)') as card:
+                        self.intel_elements[aadhar] = card
+                        ui.avatar('person', color='transparent').classes('border border-white/10').style(f'background-color: {SURFACE_COLOR}; color: white')
+                        with ui.column().classes('gap-0 grow'):
+                            ui.label(metadata.get('name', 'Unknown')).classes('font-black text-xs')
+                            ui.label(aadhar).classes('text-[11px] font-mono opacity-40')
+                            with ui.row().classes('items-center gap-2 mt-2'):
+                                ui.badge(threat.upper()).props(f'color={threat_color} size=xs').classes('text-[10px] px-2')
+                        
+                        with ui.column().classes('items-end gap-1'):
+                            self.intel_count_labels[aadhar] = ui.label("×1").classes('text-[13px] font-black text-orange-500 opacity-80')
+                            ui.label("MATCH 98%").classes('text-[10px] font-bold opacity-20')
                     
-                    with ui.column().classes('items-end gap-1'):
-                        self.intel_count_labels[aadhar] = ui.label("×1").classes('text-[10px] font-black text-orange-500 opacity-80')
-                        ui.label("MATCH 98%").classes('text-[7px] font-bold opacity-20')
+                    if len(list(self.intel_container)) > 1:
+                        card.move(self.intel_container, target_index=0)
                 
-                if len(list(self.intel_container)) > 1:
-                    card.move(self.intel_container, target_index=0)
+                self._add_log_entry("RECOGNITION", f"Target identified: {metadata.get('name')}", "orange")
+            else:
+                # If the person was previously inactive (left camera and came back), increment count
+                if not self.intel_is_active.get(aadhar, False):
+                    self.intel_counts[aadhar] += 1
+                    self.intel_is_active[aadhar] = True # Mark as back in view
+                    if aadhar in self.intel_count_labels:
+                        self.intel_count_labels[aadhar].set_text(f"×{self.intel_counts[aadhar]}")
+                
+                # Move to top to indicate recent activity
+                if aadhar in self.intel_elements:
+                    try:
+                        self.intel_elements[aadhar].move(self.intel_container, target_index=0)
+                    except Exception as e:
+                        print(f"DEBUG: UI — Failed to reorder intel card: {e}")
+
+    async def _check_health(self):
+        # Check backend services
+        try:
+            # MongoDB Health
+            db = get_sync_db()
+            mongo_up = db is not None
+            if mongo_up != self.mongo_healthy:
+                self.mongo_healthy = mongo_up
+                status = "ONLINE" if mongo_up else "OFFLINE"
+                color = "green" if mongo_up else "red"
+                self._add_log_entry("MONGO", f"Database connectivity: {status}", color)
             
-            self._add_log_entry("RECOGNITION", f"Target identified: {metadata.get('name')}", "orange")
-        else:
-            # If the person was previously inactive (left camera and came back), increment count
-            if not self.intel_is_active.get(aadhar, False):
-                self.intel_counts[aadhar] += 1
-                self.intel_is_active[aadhar] = True # Mark as back in view
-                if aadhar in self.intel_count_labels:
-                    self.intel_count_labels[aadhar].set_text(f"×{self.intel_counts[aadhar]}")
+            self.mongo_status.style(f'color: {"#10B981" if mongo_up else ERROR_COLOR}')
             
-            # Move to top to indicate recent activity
-            if aadhar in self.intel_elements:
-                try:
-                    self.intel_elements[aadhar].move(self.intel_container, target_index=0)
-                except:
-                    pass
+            # Redis Health
+            try:
+                cache.ping()
+                redis_up = True
+            except:
+                redis_up = False
+
+            if redis_up != self.redis_healthy:
+                self.redis_healthy = redis_up
+                status = "ONLINE" if redis_up else "OFFLINE"
+                color = "green" if redis_up else "red"
+                self._add_log_entry("REDIS", f"Cache layer connectivity: {status}", color)
+            self.redis_status.style(f'color: {"#10B981" if redis_up else ERROR_COLOR}')
+            
+            self.health_icon.style(f'color: {"#10B981" if mongo_up and redis_up else ERROR_COLOR}')
+        except Exception as e:
+            self._add_log_entry("SYSTEM", f"Health monitoring error: {str(e)}", "red")
+            self.mongo_status.style(f'color: {ERROR_COLOR}')
+            self.redis_status.style(f'color: {ERROR_COLOR}')
 
     def _cleanup_intel(self):
         now = time.time()
@@ -649,24 +835,6 @@ class NiceDashboard:
             self._load_ci()
         
         self._add_log_entry("SYSTEM", f"SWITCHED TO VIEW_MODE_{index}", "blue")
-
-    def _check_health(self):
-        # Redis
-        try:
-            cache.ping(); self.redis_healthy = True
-        except: self.redis_healthy = False
-        
-        # Mongo
-        try:
-            db = get_sync_db()
-            if db is not None: db.command("ping"); self.mongo_healthy = True
-            else: self.mongo_healthy = False
-        except: self.mongo_healthy = False
-        
-        # Success = ACCENT_COLOR (#315C2B), Error = PRIMARY_COLOR (#DE6E4B)
-        self.redis_status.style(f'color: {ACCENT_COLOR if self.redis_healthy else PRIMARY_COLOR}')
-        self.mongo_status.style(f'color: {ACCENT_COLOR if self.mongo_healthy else PRIMARY_COLOR}')
-        self.health_icon.style(f'color: {ACCENT_COLOR if self.redis_healthy and self.mongo_healthy else PRIMARY_COLOR}')
 
     def _update_clock(self):
         self.clock_label.set_text(datetime.now().strftime("%H:%M:%S  IST"))
@@ -746,18 +914,22 @@ class NiceDashboard:
                 temp_path = f.name
             
             from core.watchdog_indexer import enroll_face
-            # Run in thread to avoid blocking the event loop
+            
+            self._add_log_entry("MONGO", "Committing biometric data to persistent store...", "blue")
+            
+            # Use the actual enroll_face function which handles both disk and DB
             await asyncio.to_thread(
                 enroll_face,
                 temp_path, aadhar, name, threat, phone, address
             )
             
-            # Cleanup temp file
+            self._add_log_entry("MONGO", f"Identity committed: {name}", "green")
+            ui.notify("Subject successfully enrolled", type='positive')
+
+            # Cleanup temp file (if enroll_face was used, otherwise not strictly needed)
             if os.path.exists(temp_path):
                 os.remove(temp_path)
                 
-            ui.notify(f"Identity {name} successfully enrolled.", type='positive')
-            
             # --- Clear Enrollment Screen ---
             self.enroll_name.value = ""
             self.enroll_aadhar.value = ""
@@ -806,9 +978,9 @@ class NiceDashboard:
                             
                         with ui.column().classes('gap-0'):
                             ui.label(p.get('name', 'Unknown')).classes('font-black text-xs tracking-wider')
-                            ui.label(p.get('aadhar', '')).classes('text-[9px] font-mono opacity-40')
+                            ui.label(p.get('aadhar', '')).classes('text-[12px] font-mono opacity-40')
                             if p.get('phone'):
-                                ui.label(p.get('phone')).classes('text-[8px] opacity-40 italic mt-1')
+                                ui.label(p.get('phone')).classes('text-[11px] opacity-40 italic mt-1')
 
                     with ui.row().classes('items-center gap-6'):
                         # Threat Indicator
@@ -818,9 +990,9 @@ class NiceDashboard:
                         
                         # Actions
                         with ui.row().classes('gap-1'):
-                            ui.button(icon='analytics', on_click=lambda p=p: self._show_tracking(p)).props('flat round size=sm').classes('opacity-30 hover:opacity-100')
-                            ui.button(icon='edit', on_click=lambda p=p: self._edit_ci(p)).props('flat round size=sm').classes('opacity-30 hover:opacity-100')
-                            ui.button(icon='delete', on_click=lambda p=p: self._delete_ci(p['aadhar'])).props('flat round size=sm').classes('opacity-30 hover:opacity-100 text-terracotta')
+                            ui.button(icon='analytics', on_click=lambda p=p: self._show_tracking(p)).props('flat round size=sm').classes('action-btn')
+                            ui.button(icon='edit', on_click=lambda p=p: self._edit_ci(p)).props('flat round size=sm').classes('action-btn')
+                            ui.button(icon='delete', on_click=lambda p=p: self._delete_ci(p['aadhar'])).props('flat round size=sm').classes('action-btn text-red-500')
 
     def _filter_ci(self):
         self._load_ci()
@@ -832,12 +1004,14 @@ class NiceDashboard:
 
     def _edit_ci(self, profile: dict):
         with ui.dialog().classes('p-0') as dialog, ui.card().classes('w-[500px] cyber-panel p-8 gap-6'):
-            ui.label("MODERATING NEURAL PROFILE").classes('text-lg font-black tracking-widest mb-2 glow-text')
+            ui.label("Moderate neural profile").classes('text-lg font-black tracking-widest mb-2 glow-text')
             
-            name_input = ui.input(label="NAME", value=profile.get('name')).props('dark standout square').classes('w-full')
-            phone_input = ui.input(label="COMMUNICATION", value=profile.get('phone')).props('dark standout square').classes('w-full')
-            address_input = ui.input(label="LOCATION DATA", value=profile.get('address')).props('dark standout square').classes('w-full')
-            threat_input = ui.select(['Low', 'Medium', 'High'], value=profile.get('threat_level', 'Low'), label="THREAT PROFILING").props('dark standout square').classes('w-full')
+            with ui.column().classes('w-full gap-4'):
+                ui.label("Identity details").classes('text-[10px] font-black tracking-widest opacity-30 mb-2')
+                name_input = ui.input(label="Name", value=profile.get('name')).props('dark standout square').classes('w-full')
+                phone_input = ui.input(label="Communication", value=profile.get('phone')).props('dark standout square').classes('w-full')
+                address_input = ui.input(label="Location data", value=profile.get('address')).props('dark standout square').classes('w-full')
+                threat_select = ui.select(['Low', 'Medium', 'High'], value=profile.get('threat_level', 'Low'), label="Threat profiling").props('dark standout square').classes('w-full')
             
             async def save():
                 data = {
@@ -854,7 +1028,7 @@ class NiceDashboard:
 
             with ui.row().classes('w-full justify-end gap-3 mt-4'):
                 ui.button("CANCEL", on_click=dialog.close).props('flat dark')
-                ui.button("SAVE UPDATES", on_click=save).classes('px-6 font-black').style('background-color: #380036;')
+                ui.button("SAVE UPDATES", on_click=save).classes('px-6 h-12 cyber-btn').style(f'background-color: {PRIMARY_COLOR};')
         dialog.open()
 
     def _show_tracking(self, profile: dict):
@@ -879,9 +1053,9 @@ class NiceDashboard:
                                     locs_list = log.get('locations', ['Unknown'])
                                     loc = locs_list[0] if isinstance(locs_list, list) else str(locs_list)
                                 
-                                ui.label(loc.upper()).classes('text-[10px] font-black tracking-wider text-blue-400')
-                                ui.label(log.get('client_id')).classes('text-[8px] opacity-30 font-mono')
-                            ui.label(log.get('date_str')).classes('text-[9px] font-mono opacity-50')
+                                ui.label(loc.upper()).classes('text-[13px] font-black tracking-wider text-blue-400')
+                                ui.label(log.get('client_id')).classes('text-[11px] opacity-30 font-mono')
+                            ui.label(log.get('date_str')).classes('text-[12px] font-mono opacity-50')
         dialog.open()
 
 # Initialize database

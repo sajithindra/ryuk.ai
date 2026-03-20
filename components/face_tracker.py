@@ -24,7 +24,7 @@ from config import (
 
 class FaceTrack:
     """State container for a single tracked face."""
-    __slots__ = ("track_id", "centroid", "velocity", "last_seen", "embedding_history", "id_cache", "smoothed_bbox")
+    __slots__ = ("track_id", "centroid", "velocity", "last_seen", "embedding_history", "id_cache", "smoothed_bbox", "pinned_identity", "recognition_backoff")
 
     def __init__(self, track_id: int, centroid: np.ndarray, embedding: np.ndarray, bbox: np.ndarray):
         self.track_id          = track_id
@@ -34,6 +34,8 @@ class FaceTrack:
         self.embedding_history = deque([embedding], maxlen=FACE_TRACK_HISTORY)
         self.id_cache          = None   # last recognised identity dict
         self.smoothed_bbox     = bbox.astype(float)
+        self.pinned_identity   = None   # Permanently stored identity for track life
+        self.recognition_backoff = 0
 
     def update(self, centroid: np.ndarray, embedding: np.ndarray, bbox: np.ndarray):
         from config import INFERENCE_THROTTLE
@@ -59,6 +61,10 @@ class FaceTrack:
         self.smoothed_bbox[1] += vy
         self.smoothed_bbox[2] += vx
         self.smoothed_bbox[3] += vy
+        
+        # Advance centroid to match predicted bbox
+        self.centroid[0] += vx
+        self.centroid[1] += vy
         
         # Damping to prevent infinite drift
         self.velocity *= 0.95
@@ -141,7 +147,37 @@ class FaceTracker:
                 "raw_face": face,
             })
 
+        self._merge_duplicate_tracks()
         return parsed
+
+    def _merge_duplicate_tracks(self):
+        """Merge tracks whose centroids are extremely close to prevent redundant boxes."""
+        tids = list(self._tracks.keys())
+        merged = set()
+        
+        for i in range(len(tids)):
+            tid1 = tids[i]
+            if tid1 in merged or tid1 not in self._tracks: continue
+            
+            for j in range(i + 1, len(tids)):
+                tid2 = tids[j]
+                if tid2 in merged or tid2 not in self._tracks: continue
+                
+                t1 = self._tracks[tid1]
+                t2 = self._tracks[tid2]
+                
+                dist = np.linalg.norm(t1.centroid - t2.centroid)
+                # If centroids are within 30 pixels (approx 5% of 640px), they are likely duplicates
+                if dist < 30.0:
+                    # Merge t2 into t1 (keep t1 as it's the older track usually)
+                    # We use the most recent last_seen
+                    t1.last_seen = max(t1.last_seen, t2.last_seen)
+                    # Merge embedding history
+                    t1.embedding_history.extend(t2.embedding_history)
+                    merged.add(tid2)
+                    
+        for tid in merged:
+            self._tracks.pop(tid, None)
 
     def prune_stale(self):
         """Remove tracks that haven't been seen recently."""

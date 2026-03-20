@@ -3,6 +3,10 @@ import cv2
 import numpy as np
 import json
 import threading
+import os
+import queue
+import subprocess
+import shlex
 from typing import Callable, List, Dict, Optional
 
 from core.state import cache, cache_str
@@ -18,6 +22,7 @@ from config import (
     FAISS_THRESHOLD,
     AUTO_AUGMENT_MIN_SIM,
     AUTO_AUGMENT_TILT_DEG,
+    USE_FFMPEG_CUDA,
 )
 
 class Processor:
@@ -41,9 +46,8 @@ class Processor:
         self._tracker = FaceTracker()
         
         self._is_inf_running = False
-        self._inf_trigger = threading.Event()
+        self._inf_queue = queue.Queue(maxsize=1)
         self._inf_lock = threading.Lock()
-        self._inf_frame: Optional[np.ndarray] = None
         
         self.latest_processed_frame: Optional[bytes] = None
         
@@ -58,10 +62,15 @@ class Processor:
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
+        self._ffmpeg_proc_ref = None # Store reference for stop()
 
     def stop(self):
         self.running = False
-        # Thread will exit on its next loop iteration. No join needed.
+        if hasattr(self, '_ffmpeg_proc_ref') and self._ffmpeg_proc_ref:
+            try:
+                self._ffmpeg_proc_ref.terminate()
+            except:
+                pass
 
     def add_listener(self, listener):
         """Register a new UI listener for this processor."""
@@ -82,26 +91,90 @@ class Processor:
         # Pull model (RTSP) vs Push model (Redis)
         cap = None
         grabber_thread = None
+        ffmpeg_proc = None
         latest_frame_data = {"frame": None, "lock": threading.Lock(), "running": True}
 
         if self.source_url:
-            print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream: {self.source_url}")
-            cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
-            if not cap.isOpened():
-                print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM")
-                return
-            
-            # RTSP Optimization: Set buffer size to 1 if supported
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if USE_FFMPEG_CUDA:
+                # 1. Dynamic Resolution Discovery via ffprobe
+                try:
+                    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 {shlex.quote(self.source_url)}"
+                    res_raw = subprocess.check_output(shlex.split(probe_cmd), timeout=5).decode().strip()
+                    native_w, native_h = map(int, res_raw.split('x'))
+                    print(f"DEBUG: Processor ({self.client_id}) — Auto-detected Stream Resolution: {native_w}x{native_h}")
+                except Exception as e:
+                    print(f"DEBUG: Processor ({self.client_id}) — Resolution discovery failed: {e}. Falling back to 1080p.")
+                    native_w, native_h = 1920, 1080
+
+                print(f"DEBUG: Processor ({self.client_id}) — Launching FFmpeg CUDA Decoder Pipe: {self.source_url}")
+                # FFmpeg command for GPU decoding (NVDEC) at NATIVE resolution
+                # Removed scale_cuda=640:640 to allow full quality display
+                cmd = (
+                    f"ffmpeg -hwaccel cuda -hwaccel_output_format cuda -rtsp_transport tcp "
+                    f"-i {shlex.quote(self.source_url)} "
+                    f"-vf 'hwdownload,format=nv12,format=bgr24' "
+                    f"-f rawvideo -pix_fmt bgr24 -"
+                )
+                
+                ffmpeg_proc = subprocess.Popen(
+                    shlex.split(cmd), 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.DEVNULL,
+                    bufsize=10**7
+                )
+                self._ffmpeg_proc_ref = ffmpeg_proc # Save reference for stop()
+                
+                # We use native resolution for display/drawing, 
+                # but we'll scale to 640x640 later just for inference.
+                w, h = native_w, native_h 
+                
+            else:
+                print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream (OpenCV Backend): {self.source_url}")
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|strict;experimental"
+                cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
+                if not cap.isOpened():
+                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM")
+                    return
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             def grabber():
-                while self.running and latest_frame_data["running"]:
-                    ret, frame = cap.read()
-                    if not ret:
-                        print(f"DEBUG: Processor ({self.client_id}) - RTSP Read Failed. Retrying...")
-                        break
-                    with latest_frame_data["lock"]:
-                        latest_frame_data["frame"] = frame
+                nonlocal ffmpeg_proc
+                if ffmpeg_proc:
+                    # Use discovered native resolution
+                    frame_size = w * h * 3
+                    
+                    while self.running and latest_frame_data["running"]:
+                        raw_frame = ffmpeg_proc.stdout.read(frame_size)
+                        if not raw_frame or len(raw_frame) != frame_size:
+                            print(f"DEBUG: Processor ({self.client_id}) - FFmpeg Pipe Break. Retrying...")
+                            ffmpeg_proc.terminate()
+                            time.sleep(1.0)
+                            ffmpeg_proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                            continue
+                        
+                        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((h, w, 3))
+                        
+                        with latest_frame_data["lock"]:
+                            latest_frame_data["frame"] = frame.copy()
+                else:
+                    # Original OpenCV grabber
+                    while self.running and latest_frame_data["running"]:
+                        if not cap.grab():
+                            print(f"DEBUG: Processor ({self.client_id}) - RTSP Grab Failed. Retrying...")
+                            time.sleep(1.0)
+                            cap.open(self.source_url, cv2.CAP_FFMPEG)
+                            continue
+                        
+                        with latest_frame_data["lock"]:
+                            needs_new_frame = latest_frame_data["frame"] is None
+                        
+                        if needs_new_frame:
+                            ret, frame = cap.retrieve()
+                            if ret:
+                                with latest_frame_data["lock"]:
+                                    latest_frame_data["frame"] = frame
+                        else:
+                            time.sleep(0.001)
             
             grabber_thread = threading.Thread(target=grabber, daemon=True)
             grabber_thread.start()
@@ -112,11 +185,15 @@ class Processor:
             if self.source_url:
                 with latest_frame_data["lock"]:
                     frame = latest_frame_data["frame"]
-                    latest_frame_data["frame"] = None # Consume the frame
+                    latest_frame_data["frame"] = None # Consume
                 
                 if frame is None:
-                    time.sleep(0.005) # Small sleep to avoid CPU spinning
+                    # Optional: print(f"DEBUG: Processor ({self.client_id}) - Waiting for frame...")
+                    time.sleep(0.001) # Ultra-short sleep
                     continue
+                
+                # Debug: Frame received
+                # print(f"DEBUG: Processor ({self.client_id}) - Consumed frame for processing.")
             else:
                 # Original Redis Pull
                 raw = cache.get(frame_key)
@@ -136,9 +213,11 @@ class Processor:
                 
                 # Trigger persistent worker (Non-blocking)
                 if not self._is_inf_running and (self._frame_count % INFERENCE_THROTTLE == 0):
-                    with self._inf_lock:
-                        self._inf_frame = frame.copy()
-                        self._inf_trigger.set()
+                    try:
+                        # Non-blocking put. If queue full, older frame is still being processed
+                        self._inf_queue.put_nowait(frame.copy())
+                    except queue.Full:
+                        pass
                 else:
                     with self._inf_lock:
                         self._tracker.predict()
@@ -151,7 +230,9 @@ class Processor:
                         if track.is_stale:
                             continue
                             
-                        meta = track.id_cache
+                        # Prioritize pinned_identity for life-of-track stability
+                        meta = track.pinned_identity if track.pinned_identity else track.id_cache
+                        
                         if not meta:
                              _, _, meta = self._get_cached_identity(track)
                         
@@ -184,74 +265,46 @@ class Processor:
             grabber_thread.join(timeout=1.0)
         if cap:
             cap.release()
+        if ffmpeg_proc:
+            ffmpeg_proc.terminate()
+            ffmpeg_proc.wait(timeout=1.0)
 
     def _persistent_inf_worker(self):
         """Persistent worker thread to avoid the overhead of spawning new threads."""
         while True: # Keep thread alive for entire app lifecycle
-            self._inf_trigger.wait(timeout=1.0)
-            if not self._inf_trigger.is_set() or not self.running:
+            try:
+                inf_frame = self._inf_queue.get(timeout=1.0)
+            except queue.Empty:
                 continue
                 
-            self._inf_trigger.clear()
-            try:
-                self._is_inf_running = True
-                
-                with self._inf_lock:
-                    inf_frame = self._inf_frame
-                    self._inf_frame = None
-                    
-                if inf_frame is not None:
-                    try:
-                        # Run AI in background
-                        self._run_inference(inf_frame)
-                    except Exception as e:
-                        print(f"Processor ({self.client_id}): AI Worker Error — {e}")
-            finally:
-                self._is_inf_running = False
+            if inf_frame is not None:
+                try:
+                    self._is_inf_running = True
+                    # Run AI in background
+                    start_time = time.time()
+                    self._run_inference(inf_frame)
+                    latency = (time.time() - start_time) * 1000
+                    print(f"PERF: Processor ({self.client_id}) — GPU Inference Complete: {latency:.2f}ms")
+                except Exception as e:
+                    print(f"Processor ({self.client_id}): AI Worker Error — {e}")
+                finally:
+                    self._is_inf_running = False
 
     def _run_inference(self, frame: np.ndarray) -> List[Dict]:
+        from config import MAX_INFERENCE_SIZE
         h, w = frame.shape[:2]
+        # Optimize: MAX_INFERENCE_SIZE (typically 640px) is the sweet spot for buffalo_l GPU compute
         scale = min(MAX_INFERENCE_SIZE / w, MAX_INFERENCE_SIZE / h)
-        inf_frame = (cv2.resize(frame,
-                               (int(w * scale), int(h * scale)),
-                               interpolation=cv2.INTER_AREA)
-                     if scale < 1.0 else frame)
+        inf_frame = (cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
+                     if scale != 1.0 else frame)
         if scale >= 1.0:
             scale = 1.0
 
         raw_faces = face_app.get(inf_frame)
         
-        # New: 180-degree rotation fallback for inverted faces
-        if not raw_faces:
-            # Rotate 180 degrees
-            inf_frame_180 = cv2.rotate(inf_frame, cv2.ROTATE_180)
-            raw_faces_180 = face_app.get(inf_frame_180)
-            
-            if raw_faces_180:
-                # Map coordinates back to original orientation
-                ih, iw = inf_frame.shape[:2]
-                for face in raw_faces_180:
-                    # Bbox: [x1, y1, x2, y2]
-                    x1, y1, x2, y2 = face.bbox
-                    # Inverted mapping: x' = w - x, y' = h - y
-                    new_x1 = iw - x2
-                    new_y1 = ih - y2
-                    new_x2 = iw - x1
-                    new_y2 = ih - y1
-                    face.bbox = np.array([new_x1, new_y1, new_x2, new_y2])
-                    
-                    # Landmarks: [x, y]
-                    if hasattr(face, 'landmark_2d_106') and face.landmark_2d_106 is not None:
-                        face.landmark_2d_106[:, 0] = iw - face.landmark_2d_106[:, 0]
-                        face.landmark_2d_106[:, 1] = ih - face.landmark_2d_106[:, 1]
-                    if hasattr(face, 'landmark_3d_68') and face.landmark_3d_68 is not None:
-                        face.landmark_3d_68[:, 0] = iw - face.landmark_3d_68[:, 0]
-                        face.landmark_3d_68[:, 1] = ih - face.landmark_3d_68[:, 1]
-                    
-                    # Store rotation info if needed (optional)
-                    face.rotated_180 = True
-                
-                raw_faces = raw_faces_180
+        # CPU OPTIMIZATION: Removed 180-degree rotation fallback. 
+        # Running inference twice per frame when no faces are detected is extremely 
+        # expensive and was likely causing significant CPU spikes.
         
         with self._inf_lock:
             tracked = self._tracker.update(raw_faces, scale)
@@ -263,7 +316,17 @@ class Processor:
                 raw_face = item["raw_face"]
                 bbox = track.smoothed_bbox.astype(int)
 
-                name, threat, meta = self._recognise(track, track_id)
+                # STICKY IDENTITY: If already pinned, skip recognition to save CPU/prevent flicker
+                if track.pinned_identity:
+                    name = track.pinned_identity.get("name", "Unknown")
+                    threat = track.pinned_identity.get("threat_level", "Low")
+                    meta = track.pinned_identity
+                else:
+                    name, threat, meta = self._recognise(track, track_id)
+                    # PIN: If we successfully recognized them, lock it to this track
+                    if meta and meta.get("name") != "Unknown":
+                        track.pinned_identity = meta
+
                 # CRITICAL: Store in track so main thread can see it immediately
                 track.id_cache = meta
 
@@ -350,12 +413,13 @@ class Processor:
                 cache_str.set(lock_key, "1", ex=3600)
 
     def _draw_frame(self, frame: np.ndarray, faces: List[Dict]):
+        from config import VIDEO_DRAW_THICKNESS_SCALE, VIDEO_FONT_SCALE_BASE
         h, w = frame.shape[:2]
         # Responsive thickness: on 4k (3840w), thinner than 2 would be invisible.
-        base_thickness = max(1, int(w / 400))
+        base_thickness = max(1, int(w / VIDEO_DRAW_THICKNESS_SCALE))
         
         # Responsive font scaling: at 1600px width, font_scale is ~1.0
-        font_scale = w / 1600.0
+        font_scale = w / VIDEO_FONT_SCALE_BASE
         font_scale = max(0.4, font_scale)
         text_thickness = max(1, int(base_thickness / 2))
 
@@ -372,7 +436,7 @@ class Processor:
                 main_color = (83, 222, 83)    # Safe Green
             text_color = (255, 255, 255)
 
-            # Draw Bounding Box
+            # Draw Bounding Box - Use LINE_4 for speed over LINE_AA
             cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, base_thickness, cv2.LINE_4)
             
             label = f" {name.upper()} "
@@ -399,9 +463,10 @@ class Processor:
             cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, text_thickness, cv2.LINE_4)
 
     def _encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
+        from config import VIDEO_JPEG_QUALITY
         try:
-            # Quality 60 for speed, balance between bandwidth and speed
-            res, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            # Quality balance between bandwidth and speed
+            res, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), VIDEO_JPEG_QUALITY])
             if not res:
                 return None
             return buffer.tobytes()
@@ -419,8 +484,8 @@ class Processor:
             h, w = frame.shape[:2]
             if w > 1280 or h > 1280:
                 scale = 1280 / max(w, h)
-                # Use NEAREST for 4K -> HD drop to save massive CPU time
-                frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_NEAREST)
+                # Use INTER_LINEAR for better quality/speed compromise than NEAREST
+                frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
 
             # frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
             # frame = cv2.flip(frame, 1)
