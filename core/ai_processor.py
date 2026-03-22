@@ -9,6 +9,9 @@ import time
 import torch
 import torch.nn.functional as F
 from torchvision.transforms import v2 as transforms
+import torch.nn as nn
+from core.logger import logger
+from core.exceptions import ProcessorError
 
 # =============================================================================
 # TENSORRT LIBRARY LOADING — Linking TRT 10 from venv
@@ -123,6 +126,37 @@ class TorchFaceAligner:
         grid = F.affine_grid(M, size=(N, 3, 112, 112), align_corners=False)
         chips = F.grid_sample(selected_frames, grid, align_corners=False, mode='bilinear', padding_mode='zeros')
         return chips
+# =============================================================================
+# TORCH GPU PREPROCESSOR
+# =============================================================================
+class TorchPreprocessor:
+    def __init__(self, target_size=(640, 640), device='cuda'):
+        self.target_size = target_size
+        self.device = device
+        
+    def preprocess_batched(self, frames_np_list):
+        """
+        Resizes and stacks frames on GPU.
+        Returns: (B, 3, H, W) float32 tensor on GPU, normalized for model.
+        """
+        if not frames_np_list:
+            return None
+        
+        # 1. Upload to GPU as uint8
+        # Ensure array is writable and contiguous to avoid PyTorch warnings/errors
+        batch_t = [torch.from_numpy(np.array(f, copy=True, order='C')).to(self.device).permute(2, 0, 1) for f in frames_np_list]
+        
+        # 2. Resize batched
+        # We use bilinear for speed/quality compromise
+        # InsightFace models (SCRFD) usually expect BGR and specific mean/std which is handled later or inside the model
+        # buffalo_sc (SCRFD) actually expects 0-255 inputs but normalized internally potentially? 
+        # No, usually they expect BGR uint8 or float32 without 1/255 scaling if not specified.
+        # But for ORT, we need float32.
+        
+        resized = [F.interpolate(f.unsqueeze(0).float(), size=self.target_size, mode='bilinear', align_corners=False) for f in batch_t]
+        batch_tensor = torch.cat(resized, dim=0)
+        
+        return batch_tensor # (B, 3, H, W)
 
 
 # =============================================================================
@@ -130,14 +164,9 @@ class TorchFaceAligner:
 # =============================================================================
 class GlobalAIProcessor:
     def __init__(self, det_size=(640, 640), models_to_load=None, use_worker=True):
-        """
-        models_to_load: List of model names to load (e.g. ['detection', 'recognition']). 
-                        If None, loads all default models.
-        use_worker: If True, starts the internal batching worker thread.
-        """
         self.det_size = det_size
         self._available = ort.get_available_providers()
-        print(f"Initializing Global AI Processor | ORT {ort.__version__} | Providers: {self._available}")
+        logger.info(f"Initializing Global AI Processor | ORT {ort.__version__} | Providers: {self._available}")
 
         _TRT_CACHE = os.path.join(os.path.dirname(__file__), "..", "data", "trt_cache")
         os.makedirs(_TRT_CACHE, exist_ok=True)
@@ -193,15 +222,17 @@ class GlobalAIProcessor:
                             return self.det_wrapper.run_optimized(input_feed[self.det_wrapper.input_name])
                     return original_run(output_names, input_feed, run_options)
                 det_model.session.run = fast_run
-                print("  [IO BINDING ✓] Enabled for Face Detection")
+                logger.info("  [IO BINDING ✓] Enabled for Face Detection")
             except Exception as e:
-                print(f"  [IO BINDING ⚠] Face Detection Failed: {e}")
+                logger.error(f"  [IO BINDING ⚠] Face Detection Failed: {e}")
+                raise ProcessorError(f"IO Binding setup failed: {e}") from e
 
 
 
         # Batching Queue
         self.input_queue = queue.Queue(maxsize=32)
         self.aligner = TorchFaceAligner(device='cuda')
+        self.preprocessor = TorchPreprocessor(target_size=self.det_size, device='cuda')
         
         if use_worker:
             self.worker_thread = threading.Thread(target=self._batch_worker, daemon=True)
@@ -211,119 +242,156 @@ class GlobalAIProcessor:
         for name, model in self.app.models.items():
             active = model.session.get_providers()
             status = "[TRT ✓]" if "TensorrtExecutionProvider" in active else "[CUDA ✓]"
-            print(f"  {status} {model.taskname} active")
+            logger.info(f"  {status} {model.taskname} active")
+
 
     def get(self, frame):
         """Unified entry point for Processor. Returns Dict with faces."""
         res_event = threading.Event()
         result = {"faces": [], "event": res_event}
-        self.input_queue.put((frame, result))
-        
         # Wait for the batch worker to process it
-        if not res_event.wait(timeout=2.0):
+        try:
+            self.input_queue.put((frame, result), timeout=1.0)
+        except queue.Full:
+            logger.error(f"[GlobalAI] CRITICAL: Input Queue FULL (qsize={self.input_queue.qsize()})")
+            return {"faces": []}
+            
+        if not res_event.wait(timeout=3.0):
+            logger.warning("[GlobalAI] WARNING: Inference Timeout (3s)")
             return {"faces": []}
         return {"faces": result["faces"]}
 
     def _batch_worker(self):
+        logger.info(f"[GlobalAI] Batch Worker Started (Threads={AI_BATCH_SIZE})")
         while True:
-            # 1. Collect Batch
             batch = []
             try:
-                # Wait for first item
-                item = self.input_queue.get(timeout=1.0)
-                batch.append(item)
-                
-                # Try to fill batch within AI_BATCH_TIMEOUT_MS
-                deadline = time.time() + (AI_BATCH_TIMEOUT_MS / 1000.0)
-                while len(batch) < AI_BATCH_SIZE:
-                    remaining = deadline - time.time()
-                    if remaining <= 0: break
-                    try:
-                        batch.append(self.input_queue.get(timeout=remaining))
-                    except queue.Empty:
-                        break
-            except queue.Empty:
-                continue
-
-            # 2. Process Batch
-            # Step A: Detection (Sequential as model is Batch-1)
-            all_faces_per_frame = []
-            
-            for i, (frame, res_obj) in enumerate(batch):
-                # Face Detection
-                bboxes, kpss = self.app.models['detection'].detect(frame, max_num=0, metric='default')
-                faces = []
-                for j in range(bboxes.shape[0]):
-                    face = Face(bbox=bboxes[j, 0:4], kps=kpss[j] if kpss is not None else None, det_score=bboxes[j, 4])
-                    faces.append(face)
-                all_faces_per_frame.append(faces)
-
-            # Step B: Landmarks/Gender (Small batches or Sequential)
-            # For simplicity, keep these sequential for now, they are very fast on TRT
-            for i, (frame, _) in enumerate(batch):
-                faces = all_faces_per_frame[i]
-                for face in faces:
-                    for taskname, model in self.app.models.items():
-                        if taskname in ['detection', 'recognition']: continue
-                        model.get(frame, face)
-
-            # Step C: Recognition (GLOBAL BATCHED + GPU ACCELERATED)
-            rec_model = self.app.models.get('recognition')
-            if rec_model:
-                landmarks = []
-                chip_map = []
-                
-                for f_idx, (frame, _) in enumerate(batch):
-                    for face in all_faces_per_frame[f_idx]:
-                        landmarks.append(face.kps)
-                        chip_map.append(f_idx)
-
-                if landmarks:
-                    # Move frames and landmarks to GPU for batched alignment
-                    with torch.no_grad():
-                        frames_gpu = torch.stack([
-                            torch.from_numpy(f).to('cuda').permute(2, 0, 1).float() 
-                            for f, _ in batch
-                        ]) # (B, 3, H, W)
-                        lms_gpu = torch.from_numpy(np.array(landmarks)).to('cuda').float() # (N, 5, 2)
-                        indices_gpu = torch.tensor(chip_map, device='cuda')
-
-                        # Batched Align on GPU
-                        chips_gpu = self.aligner.align_batched(frames_gpu, lms_gpu, indices_gpu)
-                        
-                        # Permute to NHWC and convert to uint8 (standard BGR chips)
-                        # We don't normalize yet because rec_model.get_feat() does its own normalization
-                        chips_gpu = chips_gpu.permute(0, 2, 3, 1)
-                        all_chips = list(chips_gpu.byte().cpu().numpy())
-
-                    embeddings = rec_model.get_feat(all_chips)
+                # 1. Collect Batch
+                try:
+                    # Wait for first item
+                    item = self.input_queue.get(timeout=1.0)
+                    batch.append(item)
                     
-                    # Normalize, cast to float32, and ensure contiguous memory layout
-                    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-                    norms = np.where(norms == 0, 1.0, norms)
-                    embeddings = (embeddings / norms).astype(np.float32)
-                    embeddings = np.ascontiguousarray(embeddings)
+                    # Filter out None frames
+                    batch = [b for b in batch if b[0] is not None]
+                    if not batch: continue
 
-                    counts = [0] * len(batch)
-                    for i, f_idx in enumerate(chip_map):
-                        face_idx = counts[f_idx]
-                        all_faces_per_frame[f_idx][face_idx].embedding = embeddings[i] # Already flat 1D in embeddings array
-                        counts[f_idx] += 1
+                    # Try to fill batch within AI_BATCH_TIMEOUT_MS
+                    deadline = time.time() + (AI_BATCH_TIMEOUT_MS / 1000.0)
+                    while len(batch) < AI_BATCH_SIZE:
+                        remaining = deadline - time.time()
+                        if remaining <= 0: break
+                        try:
+                            batch.append(self.input_queue.get(timeout=remaining))
+                        except queue.Empty:
+                            break
+                except queue.Empty:
+                    continue
 
-            # 3. Finalize and Signal
-            for i, (_, res_obj) in enumerate(batch):
-                res_obj["faces"] = all_faces_per_frame[i]
-                res_obj["event"].set()
+                # 2. Process Batch
+                # Step A: Detection (BATCHED ON GPU)
+                logger.debug(f"Processing Batch of {len(batch)} frames...")
+                all_faces_per_frame = []
+                
+                with torch.no_grad():
+                    frames_np = [f for f, _ in batch]
+                    # Preprocess on GPU
+                    logger.debug("  [Step] GPU Preprocessing...")
+                    batch_tensor = self.preprocessor.preprocess_batched(frames_np) # (B, 3, H, W)
+                    
+                    logger.debug("  [Step] Face Detection...")
+                    det_model = self.app.models['detection']
+                    
+                    # REVISED: Keep detection sequential for now to avoid breaking post-processing logic,
+                    # but use the GPU preprocessor to speed up the data prep.
+                    for i, (f_ptr, _) in enumerate(batch):
+                        # Ensure frame is contiguous for detection
+                        bboxes, kpss = det_model.detect(np.ascontiguousarray(f_ptr), max_num=0, metric='default')
+                        faces = []
+                        if bboxes is not None:
+                            for j in range(bboxes.shape[0]):
+                                face = Face(bbox=bboxes[j, 0:4], kps=kpss[j] if kpss is not None else None, det_score=bboxes[j, 4])
+                                faces.append(face)
+                        all_faces_per_frame.append(faces)
+
+                # Step B: Landmarks/Gender
+                logger.debug("  [Step] Attributes (Landmarks/Gender)...")
+                for i, (frame, _) in enumerate(batch):
+                    faces = all_faces_per_frame[i]
+                    for face in faces:
+                        for taskname, model in self.app.models.items():
+                            if taskname in ['detection', 'recognition']: continue
+                            model.get(frame, face)
+
+                # Step C: Recognition (GLOBAL BATCHED + GPU ACCELERATED)
+                rec_model = self.app.models.get('recognition')
+                if rec_model:
+                    logger.debug("  [Step] Recognition (Batched GPU)...")
+                    all_chips = []
+                    chip_to_face_idx = [] # (batch_idx, face_idx_in_frame)
+                    
+                    with torch.no_grad():
+                        for f_idx, (frame, _) in enumerate(batch):
+                            faces = all_faces_per_frame[f_idx]
+                            if not faces: continue
+                            
+                            # Align faces for THIS frame (avoids different resolution stacking issues)
+                            frame_lms = [face.kps for face in faces]
+                            
+                            # Upload frame once per unique frame in batch
+                            frame_gpu = torch.from_numpy(np.ascontiguousarray(frame)).to('cuda').permute(2, 0, 1).float().unsqueeze(0)
+                            lms_gpu = torch.from_numpy(np.array(frame_lms)).to('cuda').float()
+                            indices_gpu = torch.zeros(len(faces), dtype=torch.long, device='cuda')
+
+                            # Align chips on GPU
+                            chips_gpu = self.aligner.align_batched(frame_gpu, lms_gpu, indices_gpu)
+                            
+                            # chips_gpu: (N, 3, 112, 112)
+                            # Permute to NHWC and convert to uint8 (standard BGR chips)
+                            chips_gpu = chips_gpu.permute(0, 2, 3, 1).byte().cpu().numpy()
+                            
+                            for i, chip in enumerate(chips_gpu):
+                                all_chips.append(chip)
+                                chip_to_face_idx.append((f_idx, i))
+
+                    if all_chips:
+                        # ALL chips are 112x112, so we can run recognition on the full batch at once!
+                        embeddings = rec_model.get_feat(all_chips)
+                        
+                        # Normalize, cast to float32, and ensure contiguous memory layout
+                        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                        norms = np.where(norms == 0, 1.0, norms)
+                        embeddings = (embeddings / norms).astype(np.float32)
+                        embeddings = np.ascontiguousarray(embeddings)
+
+                        for i, (f_idx, face_idx) in enumerate(chip_to_face_idx):
+                            all_faces_per_frame[f_idx][face_idx].embedding = embeddings[i]
+
+                # 3. Finalize and Signal
+                logger.debug(f"  [Done] Batch processed. Signaling {len(batch)} results.")
+                for i, (_, res_obj) in enumerate(batch):
+                    res_obj["faces"] = all_faces_per_frame[i]
+                    res_obj["event"].set()
+                    
+            except Exception as e:
+                import traceback
+                err_msg = f"CRITICAL ERROR in Batch Worker: {e}\n{traceback.format_exc()}"
+                logger.error(err_msg)
+                # Signal waiting events so they don't hang
+                if 'batch' in locals():
+                    for _, res_obj in batch:
+                        res_obj["event"].set()
+                time.sleep(1)
 
 # Instantiate Singleton with DEFAULT behavior
 face_app = GlobalAIProcessor(det_size=MAX_INFERENCE_SIZE if isinstance(MAX_INFERENCE_SIZE, tuple) else (MAX_INFERENCE_SIZE, MAX_INFERENCE_SIZE))
 
 # Warmup
 def warmup():
-    print("GPU Warmup (Managed Batching)...")
+    logger.info("GPU Warmup (Managed Batching)...")
     dummy = np.zeros((*face_app.det_size, 3), dtype=np.uint8)
     for _ in range(20):
         face_app.get(dummy)
-    print("GPU Warmup Complete.")
+    logger.info("GPU Warmup Complete.")
 
 threading.Thread(target=warmup, daemon=True).start()

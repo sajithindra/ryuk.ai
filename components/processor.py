@@ -292,26 +292,27 @@ class Processor:
             try:
                 # We poll the results key. 
                 # Alternative: Use Redis Pub/Sub for lower latency notifications
-                data = cache.get(res_key)
-                if data:
+                raw_res = cache.blpop(res_key, timeout=1)
+                if raw_res:
+                    _, data = raw_res
                     packet = serde.unpack(data)
                     if not packet:
                         continue
-                    # Consume results (clear key so we don't process same result twice)
-                    cache.delete(res_key)
-                    
+                        
                     faces = packet.get('faces', [])
-                    search_results = packet.get('search_results', [])
+                    recognition = packet.get('recognition', [])
                     
-                    # We need to map search_results (identities) back to face objects
+                    if packet.get('frame_count', 0) % 20 == 0:
+                         print(f"DEBUG: Processor ({self.client_id}) — Received Result Packet (Faces: {len(faces)})")
+                    
+                    # We need to map recognition (identities) back to face objects
                     # so tracker can see them.
                     for i, face in enumerate(faces):
-                        if i < len(search_results):
-                            # The 'result' from search.py might be the identity meta
+                        if i < len(recognition):
                             if isinstance(face, dict):
-                                face['ident_meta'] = search_results[i]
+                                face['ident_meta'] = recognition[i]
                             else:
-                                face.ident_meta = search_results[i]
+                                face.ident_meta = recognition[i]
 
                     with self._inf_lock:
                         # Trackers update() logic expects raw_faces (list of insightface.Face)

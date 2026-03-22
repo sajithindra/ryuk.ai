@@ -20,6 +20,10 @@ DB_NAME    = "ryuk_ai"
 # Paths
 # ---------------------------------------------------------------------------
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
+
+# Logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FILE  = os.path.join(BASE_DIR, "main.log")
 DATA_DIR       = os.path.join(BASE_DIR, "data")
 MODELS_DIR     = os.path.join(DATA_DIR, "models")
 TRT_CACHE_DIR  = os.path.join(DATA_DIR, "trt_cache")

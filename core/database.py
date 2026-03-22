@@ -3,6 +3,8 @@ import pymongo
 import asyncio
 
 from config import MONGO_URI, DB_NAME
+from core.logger import logger
+from core.exceptions import DatabaseError
 
 # Async client for FastAPI / async routes
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
@@ -22,9 +24,10 @@ async def init_db():
         await cameras_col.create_index("client_id", unique=True)
         await activity_logs_col.create_index([("aadhar", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)])
         await activity_logs_col.create_index([("client_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)])
-        print("MongoDB: Database and indexes initialized.")
+        logger.info("MongoDB: Database and indexes initialized.")
     except Exception as e:
-        print(f"MongoDB: Init error (Unreachable): {e}")
+        logger.error(f"MongoDB: Init error (Unreachable): {e}")
+        raise DatabaseError(f"Failed to initialize MongoDB: {e}") from e
 
 # ---------------------------------------------------------------------------
 # Sync client singleton – reused across health checks and watchdog operations.
@@ -45,9 +48,9 @@ def get_sync_db():
         _sync_client.admin.command('ping')
         return _sync_client[DB_NAME]
     except Exception as e:
-        print(f"MongoDB Sync Error: {e}")
+        logger.error(f"MongoDB Sync Error: {e}")
         _sync_client = None  # Force reconnect on next call
-        return None
+        raise DatabaseError(f"MongoDB Sync Error: {e}") from e
 
 # Run init in the background event loop if one is already running,
 # or it will be called by the server startup.

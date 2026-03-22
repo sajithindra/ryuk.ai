@@ -76,17 +76,19 @@ def run_sink_service():
             if not packet:
                 continue
             
-            search_results = packet.get('search_results', [])
+            recognition = packet.get('recognition', [])
             client_id = packet.get('client_id')
             
-            if not search_results:
+            if not recognition:
                 # No faces identified, still push the packet for UI to clear boxes
-                cache.set(f"stream:{client_id}:results", serde.pack(packet), ex=5)
+                res_key = f"stream:{client_id}:results"
+                cache.rpush(res_key, serde.pack(packet))
+                cache.ltrim(res_key, -5, -1) # Keep only 5 recent results to avoid memory leaks
                 continue
                 
             start_time = time.time()
             
-            for i, res in enumerate(search_results):
+            for i, res in enumerate(recognition):
                 if not res or 'name' not in res:
                     continue
                 
@@ -128,10 +130,11 @@ def run_sink_service():
                         cache_str.set(alert_lock, "1", ex=int(ALERT_COOLDOWN_S))
 
             res_key = f"stream:{client_id}:results"
-            cache.set(res_key, serde.pack(packet), ex=5)
+            cache.rpush(res_key, serde.pack(packet))
+            cache.ltrim(res_key, -5, -1) # Keep only 5 recent results
             
             if packet.get('frame_count', 0) % 50 == 0:
-                print(f"SINK: Finished processing {client_id} | Faces: {len(search_results)}")
+                print(f"SINK: Finished processing {client_id} | Faces: {len(recognition)}")
                 
         except Exception as e:
             print(f"ERROR in Sink Service: {e}")

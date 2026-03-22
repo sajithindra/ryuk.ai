@@ -13,6 +13,13 @@ import queue
 import base64
 import io
 import urllib.parse
+import psutil
+import subprocess
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 from core.state import cache, cache_str
 from core.database import get_sync_db, profiles_col, cameras_col, init_db
@@ -27,15 +34,16 @@ from config import (
 )
 
 # User-defined Design Tokens
-BG_COLOR = "#0A0B10" # Deep Obsidian
-SURFACE_COLOR = "#161821" # Dark Slate Surface
-PRIMARY_COLOR = "#3D7BFF" # Vibrant Action Blue
-ACCENT_COLOR = "#00D1FF" # Tech Cyan
-ERROR_COLOR = "#FF4B4B"   # High-visibility Red
-TEXT_HIGH = "#FFFFFF"
-TEXT_MED = "#94A3B8"      # Balanced Slate Grey
-OUTLINE_COLOR = "#232634"
-GLOW_COLOR = "0 0 20px rgba(61, 123, 255, 0.3)"
+BG_COLOR = "#050608" # Near Black
+SURFACE_COLOR = "rgba(16, 18, 27, 0.4)" # Glass Surface
+PRIMARY_COLOR = "#00D1FF" # Cyber Cyan
+ACCENT_COLOR = "#7000FF" # Deep Purple Accent
+ERROR_COLOR = "#FF3333"
+SUCCESS_COLOR = "#00FF94"
+TEXT_HIGH = "#F0F2F5"
+TEXT_MED = "#6B7280"
+OUTLINE_COLOR = "rgba(255, 255, 255, 0.08)"
+GLOW_COLOR = "0 0 30px rgba(0, 209, 255, 0.2)"
 
 # Global state for background tasks and shared endpoints
 active_sessions: Dict[str, Processor] = {}
@@ -62,7 +70,8 @@ class NiceDashboard:
         self._setup_ui()
         
         # Start background timers
-        ui.timer(2.0, self._check_new_streams) # Sync cards every 2s
+        ui.timer(2.0, self._update_system_stats)
+        ui.timer(2.0, self._check_new_streams)
         ui.timer(HEALTH_INTERVAL_MS / 1000, self._check_health)
         ui.timer(1.0, self._update_clock)
         ui.timer(5.0, self._cleanup_intel)
@@ -83,7 +92,7 @@ class NiceDashboard:
                 :root {{
                     --primary: {PRIMARY_COLOR};
                     --accent: {ACCENT_COLOR};
-                    --success: #10B981;
+                    --success: {SUCCESS_COLOR};
                     --bg: {BG_COLOR};
                     --surface: {SURFACE_COLOR};
                     --outline: {OUTLINE_COLOR};
@@ -91,114 +100,150 @@ class NiceDashboard:
                     --text-muted: {TEXT_MED};
                 }}
 
+                body {{
+                    background: radial-gradient(circle at 50% 0%, #11141d 0%, #050608 100%);
+                }}
+
                 .cyber-panel {{
                     background: var(--surface) !important;
-                    backdrop-filter: blur(20px);
+                    backdrop-filter: blur(25px) saturate(180%);
                     border: 1px solid var(--outline) !important;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+                    border-radius: 16px !important;
                 }}
                 
-                .cyber-border-l {{ border-left: 2px solid var(--primary); }}
-                .cyber-border-r {{ border-right: 2px solid var(--primary); }}
+                .cyber-border-l {{ border-left: 3px solid var(--primary); }}
                 
                 .glow-text {{
-                    text-shadow: 0 0 12px rgba(61, 123, 255, 0.4);
+                    color: var(--text);
+                    text-shadow: 0 0 15px rgba(0, 209, 255, 0.5);
                 }}
                 
                 .scroll-hidden::-webkit-scrollbar {{ display: none; }}
                 
                 .telemetry-bar {{
-                    background: rgba(10, 11, 16, 0.9);
+                    background: rgba(5, 6, 8, 0.7);
+                    backdrop-filter: blur(10px);
                     border-bottom: 1px solid var(--outline);
                 }}
                 
-                .nav-icon-btn i {{ color: #64748B !important; }}
                 .nav-icon-btn {{
-                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                    border: 1px solid transparent !important;
+                    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    color: var(--text-muted) !important;
                 }}
                 .nav-icon-btn:hover {{
-                    background: rgba(61, 123, 255, 0.08) !important;
                     color: var(--primary) !important;
-                    border-color: rgba(61, 123, 255, 0.2) !important;
-                    transform: scale(1.1);
+                    background: rgba(0, 209, 255, 0.1) !important;
+                    transform: translateX(5px) scale(1.1);
                 }}
                 .nav-icon-btn.active {{
                     color: var(--primary) !important;
-                    background: rgba(61, 123, 255, 0.15) !important;
-                    border: 1px solid rgba(61, 123, 255, 0.3) !important;
-                    box-shadow: 0 0 20px rgba(61, 123, 255, 0.2);
+                    background: rgba(0, 209, 255, 0.15) !important;
+                    border: 1px solid rgba(0, 209, 255, 0.3) !important;
+                    box-shadow: 0 0 30px rgba(0, 209, 255, 0.3);
                 }}
                 .nav-icon-btn.active i {{ color: var(--primary) !important; }}
-
-                .action-btn {{
-                    transition: all 0.2s ease;
-                    opacity: 0.4;
-                    filter: grayscale(1);
-                }}
-                .action-btn:hover {{
-                    opacity: 1;
-                    filter: grayscale(0);
-                    background: rgba(255, 255, 255, 0.05) !important;
-                    transform: scale(1.2);
-                }}
 
                 .cam-card {{
                     position: relative;
                     overflow: hidden;
-                    border-radius: 12px !important;
+                    border-radius: 20px !important;
                     border: 1px solid var(--outline) !important;
-                    background: var(--surface) !important;
-                    transition: all 0.3s ease;
+                    background: rgba(16, 18, 27, 0.6) !important;
+                    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
                 }}
                 .cam-card:hover {{
                     border-color: var(--primary) !important;
-                    transform: translateY(-4px);
-                    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+                    transform: translateY(-8px) scale(1.02);
+                    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 209, 255, 0.2);
+                    z-index: 10;
                 }}
                 
                 .intel-item {{
-                    border-left: 2px solid transparent;
-                    transition: all 0.2s;
-                    border-radius: 8px;
-                    background: rgba(255, 255, 255, 0.02);
+                    border-left: 4px solid transparent;
+                    transition: all 0.3s ease;
+                    border-radius: 12px;
+                    background: rgba(255, 255, 255, 0.03);
+                    margin-bottom: 8px;
                 }}
                 .intel-item:hover {{
-                    background: rgba(255, 255, 255, 0.05);
+                    background: rgba(255, 255, 255, 0.08);
                     border-left-color: var(--primary);
+                    transform: scale(1.02);
                 }}
 
                 .cyber-btn {{
-                    border-radius: 8px !important;
-                    font-weight: 700 !important;
-                    letter-spacing: 1.5px !important;
-                    text-transform: uppercase !important;
-                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-                    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                    border-radius: 12px !important;
+                    font-weight: 800 !important;
+                    letter-spacing: 2px !important;
+                    background: linear-gradient(135deg, var(--primary), var(--accent)) !important;
+                    box-shadow: 0 4px 15px rgba(0, 209, 255, 0.3) !important;
                 }}
                 .cyber-btn:hover {{
-                    transform: translateY(-2px);
-                    box-shadow: 0 8px 24px rgba(61, 123, 255, 0.4);
-                    border-color: rgba(255, 255, 255, 0.3) !important;
+                    filter: brightness(1.2);
+                    box-shadow: 0 8px 30px rgba(0, 209, 255, 0.5) !important;
                 }}
-                .cyber-btn:active {{
-                    transform: translateY(0);
+
+                @keyframes pulse-glow {{
+                    0% {{ box-shadow: 0 0 5px rgba(0, 209, 255, 0.2); }}
+                    50% {{ box-shadow: 0 0 20px rgba(0, 209, 255, 0.5); }}
+                    100% {{ box-shadow: 0 0 5px rgba(0, 209, 255, 0.2); }}
+                }}
+
+                .active-ai-track {{
+                    animation: pulse-glow 2s infinite;
                 }}
 
                 .scanline {{
                     width: 100%;
                     height: 100px;
                     z-index: 5;
-                    background: linear-gradient(0deg, rgba(0, 0, 0, 0) 0%, rgba(61, 123, 255, 0.05) 50%, rgba(0, 0, 0, 0) 100%);
+                    background: linear-gradient(0deg, rgba(0, 209, 255, 0) 0%, rgba(0, 209, 255, 0.1) 50%, rgba(0, 209, 255, 0) 100%);
                     opacity: 0.1;
                     position: absolute;
                     bottom: 100%;
-                    pointer-events: none;
                     animation: scanline 8s linear infinite;
+                    pointer-events: none;
                 }}
+
                 @keyframes scanline {{
                     0% {{ bottom: 100%; }}
                     100% {{ bottom: -100px; }}
+                }}
+
+                .health-pulse {{
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    background: {SUCCESS_COLOR};
+                    box-shadow: 0 0 10px {SUCCESS_COLOR};
+                    animation: health-pulse 2s infinite;
+                }}
+
+                .stat-box {{
+                    background: rgba(255,255,255,0.03);
+                    border-radius: 8px;
+                    padding: 8px 12px;
+                    border: 1px solid rgba(255,255,255,0.05);
+                }}
+                .stat-label {{
+                    font-size: 9px;
+                    font-weight: 800;
+                    letter-spacing: 1px;
+                    color: rgba(255,255,255,0.3);
+                    text-transform: uppercase;
+                }}
+                .stat-value {{
+                    font-family: 'JetBrains Mono', 'Roboto Mono', monospace;
+                    font-size: 13px;
+                    font-weight: 900;
+                    color: {PRIMARY_COLOR};
+                }}
+
+                @keyframes health-pulse {{
+                    0% {{ transform: scale(1); opacity: 1; }}
+                    50% {{ transform: scale(1.5); opacity: 0.5; }}
+                    100% {{ transform: scale(1); opacity: 1; }}
                 }}
             </style>
         """)
@@ -219,7 +264,12 @@ class NiceDashboard:
                 self.nav_btns[0].classes('active')
                 
                 ui.space()
-                self.health_icon = ui.icon('sensors', color='white').style('font-size: 18px;')
+                with ui.column().classes('items-center mb-6 gap-2'):
+                    ui.element('div').classes('health-pulse')
+                    self.health_icon = ui.icon('sensors', color='white').style('font-size: 16px; opacity: 0.4;')
+                
+                
+                # Periodically update system stats
 
             # 2. ACTIVITY INTELLIGENCE (Left Panel)
             with ui.column().classes('h-full p-0 cyber-panel border-r border-white/5 transition-all') as self.left_panel:
@@ -245,6 +295,10 @@ class NiceDashboard:
                         ui.badge("STABLE").props('color=green-9 size=sm').classes('text-[10px] px-2')
                     with ui.row().classes('items-center gap-6'):
                         self.clock_label = ui.label().classes('font-mono text-[14px] font-bold opacity-90')
+                        with ui.row().classes('items-center gap-4 bg-black/20 px-4 py-1 rounded-full border border-white/5'):
+                            self.cpu_label = ui.label("CPU --%").classes('text-[11px] font-mono text-blue-400')
+                            self.mem_label = ui.label("MEM --%").classes('text-[11px] font-mono text-purple-400')
+                            self.gpu_label = ui.label("GPU --%").classes('text-[11px] font-mono text-green-400')
                         # Right Toggle (if hidden)
                         self.right_toggle_btn = ui.button(icon='analytics', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('ml-2')
                         self.right_toggle_btn.set_visibility(False)
@@ -1017,10 +1071,12 @@ class NiceDashboard:
                     "name": name_input.value,
                     "phone": phone_input.value,
                     "address": address_input.value,
-                    "threat_level": threat_input.value
+                    "threat_level": threat_select.value
                 }
                 from core.watchdog_indexer import update_profile
                 await asyncio.to_thread(update_profile, profile['aadhar'], data)
+                self._load_ci()
+                ui.notify("PROFILE SYNCHRONIZED", color='green')
                 dialog.close()
                 self._load_ci()
                 ui.notify("Profile metadata updated.", color='green')
@@ -1056,6 +1112,51 @@ class NiceDashboard:
                                 ui.label(log.get('client_id')).classes('text-[11px] opacity-30 font-mono')
                             ui.label(log.get('date_str')).classes('text-[12px] font-mono opacity-50')
         dialog.open()
+
+    def _update_system_stats(self):
+        """Update CPU, GPU and RAM stats in the UI"""
+        try:
+            import psutil
+            import subprocess
+            
+            # CPU and RAM
+            cpu_usage = psutil.cpu_percent()
+            ram = psutil.virtual_memory()
+            
+            # GPU stats using nvidia-smi
+            gpu_usage = "N/A"
+            vram_usage = "N/A"
+            try:
+                # nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits
+                res = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], encoding='utf-8')
+                parts = [p.strip() for p in res.split(',')]
+                if len(parts) >= 3:
+                    gpu_usage = f"{parts[0]}%"
+                    vram_usage = f"{int(parts[1])}/{int(parts[2])}MB"
+            except Exception:
+                pass
+
+            # Update Labels
+            if hasattr(self, 'cpu_label'):
+                self.cpu_label.set_text(f"CPU: {cpu_usage}%")
+            
+            if hasattr(self, 'mem_label'):
+                self.mem_label.set_text(f"RAM: {ram.percent}%")
+                self.mem_label.tooltip(f"MEM: {ram.used//(1024**2)}MB / {ram.total//(1024**2)}MB")
+            
+            if hasattr(self, 'gpu_label'):
+                self.gpu_label.set_text(f"GPU: {gpu_usage} | VRAM: {vram_usage}")
+                self.gpu_label.tooltip("NVIDIA SMI Real-time Telemetry")
+
+            # Health pulse color logic
+            if hasattr(self, 'health_icon'):
+                if cpu_usage > 80 or ram.percent > 90:
+                    self.health_icon.style('color: #FF3333 !important; opacity: 1;')
+                else:
+                    self.health_icon.style('color: #00FF94 !important; opacity: 0.6;')
+
+        except Exception as e:
+            print(f"Stats Error: {e}")
 
 # Initialize database
 app.on_startup(init_db)

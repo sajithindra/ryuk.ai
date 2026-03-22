@@ -1,6 +1,7 @@
 import subprocess
 import socket
 import re
+from core.logger import logger
 
 def get_local_ip():
     """Returns the primary local IP address."""
@@ -50,11 +51,11 @@ def scan_network_for_rtsp(network_range=None, additional_ports=None):
                 if match:
                     ips.append(match.group(1))
         
-        print(f"Found {len(ips)} devices with RTSP ports open")
+        logger.info(f"Found {len(ips)} devices with RTSP ports open")
         return ips
     except subprocess.TimeoutExpired:
-        print("Network scan timed out")
+        logger.warning("Network scan timed out")
         return []
     except Exception as e:
-        print(f"Discovery error: {e}")
+        logger.error(f"Discovery error: {e}")
         return []

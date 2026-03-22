@@ -8,9 +8,7 @@ import signal
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 SERVICES = [
-    "services/detector.py",
-    "services/embedder.py",
-    "services/search.py",
+    "services/unified_engine.py",
     "services/sink.py"
 ]
 

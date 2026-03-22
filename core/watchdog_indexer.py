@@ -365,7 +365,10 @@ class WatchdogIndexer:
             
         # 4. Pose Penalty (Yaw/Pitch/Roll)
         # Frontal faces are (0,0,0). Angles > 25 degrees are penalized.
-        pose = context.get("pose", [0, 0, 0])
+        pose = context.get("pose")
+        if pose is None:
+            pose = [0, 0, 0]
+            
         pose_penalty = sum(max(0, abs(angle) - 25) for angle in pose) * 0.001 
         
         adaptive_threshold = base_threshold + lighting_penalty + quality_penalty + pose_penalty

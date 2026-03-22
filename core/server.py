@@ -98,6 +98,18 @@ class StreamingServer:
                 if count <= 5 or count % 100 == 0:
                     print(f"DEBUG: Camera {client_id} — Received frame {count} ({len(data)} bytes)")
                 cache.set(f"stream:{client_id}:frame", data, ex=5)
+                
+                # Push to Unified Inference Engine (Micro-Pipeline)
+                import core.serialization as serde
+                packet = {
+                    "client_id": client_id,
+                    "frame_count": count,
+                    "timestamp": datetime.now().timestamp(),
+                    "frame_bytes": data # Pass raw bytes to avoid double-encoding
+                }
+                cache.rpush("ryuk:ingest", serde.pack(packet))
+                if cache.llen("ryuk:ingest") > 50:
+                    cache.lpop("ryuk:ingest")
         except WebSocketDisconnect:
             print(f"Camera {client_id} disconnected.")
         finally:

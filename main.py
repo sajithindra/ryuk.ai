@@ -69,5 +69,27 @@ if __name__ == "__main__":
     print(f"* Streaming API: ws://{IP}:{SERVER_PORT}/api/ws/stream")
     print("*" * 50)
 
-    # The streaming server is mounted inside nice_gui.py
+    # 1. Start Background Services (Unified Engine & Sink)
+    manager_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "services", "manager.py")
+    print(f"[*] Launching background services via {manager_path}...")
+    
+    # We use subprocess.Popen to let it run in the background
+    # It inherits the current environment (including LD_LIBRARY_PATH from bootstrap)
+    svc_manager = subprocess.Popen([sys.executable, manager_path], 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.STDOUT,
+                                   text=True,
+                                   bufsize=1)
+    
+    # Optional: Small thread to pipe manager output to main log/console
+    def pipe_output(proc):
+        for line in proc.stdout:
+            print(f"[MANAGER] {line.strip()}")
+            
+    threading.Thread(target=pipe_output, args=(svc_manager,), daemon=True).start()
+    
+    # Ensure services are killed on exit
+    atexit.register(lambda: svc_manager.terminate())
+
+    # 2. Run the Dashboard
     run_nicegui()
