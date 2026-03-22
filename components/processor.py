@@ -335,7 +335,8 @@ class Processor:
                             else:
                                 meta = getattr(raw_face, "ident_meta", None)
                                 
-                            if meta and meta.get("name") != "Unknown":
+                            # PIN IDENTITY: Only if we found a valid person (with a name)
+                            if meta and meta.get("name") and meta.get("name") != "Unknown":
                                 track.pinned_identity = meta
                             track.id_cache = meta
 

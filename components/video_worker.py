@@ -86,9 +86,14 @@ class VideoProcessor(QThread):
             if raw:
                 self._frame_count = (self._frame_count + 1) % 10_000
                 
+                # Predict track positions every frame for KF stability
+                # CALLED BEFORE FRAME SKIP to ensure smooth prediction even at 30fps
+                with self._inf_lock:
+                    self._tracker.predict()
+
                 # Frame-level optimization: Skip decoding/processing if not on target frame
                 if self._frame_count % FRAME_SKIP != 0:
-                    self.msleep(5)
+                    self.msleep(2) # Shorter sleep to maintain pull rate
                     continue
 
                 frame = self._decode_frame(raw)
@@ -198,8 +203,8 @@ class VideoProcessor(QThread):
             # Potential slow DB/Network call
             name, threat, meta = self._recognise(track, track_id, context=context)
             
-            # PIN IDENTITY: If we found a valid person, lock it to this track
-            if meta and meta.get("name") != "Unknown":
+            # PIN IDENTITY: If we found a valid person (with a name), lock it to this track
+            if meta and meta.get("name") and meta.get("name") != "Unknown":
                 track.pinned_identity = meta
             track.id_cache = meta
 

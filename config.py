@@ -40,7 +40,7 @@ MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
 FACE_MAX_INACTIVE_S   = 10.0   # Allowed to stay for 10s without detection
-FACE_TRACK_MAX_DIST   = 200    # Increased for fast movement
+FACE_TRACK_MAX_DIST   = 400    # Increased for fast movement and head twists
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
 
 # GLOBAL AI PROCESSOR BATCHING

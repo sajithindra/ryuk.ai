@@ -63,24 +63,33 @@ class DeepSortTrack:
         self.face_embedding = face_embedding
         self.raw_face = raw_face
         self.hits = 1
-        self.age = 1
-        self.time_since_update = 0
         self.state = 0 # 0: Tentative, 1: Confirmed, 2: Deleted
         self.pinned_identity = None
         self.id_cache = None
+        
+        self.time_since_update = 0
+        
+        # Real-time persistence
+        self.last_update_time = time.time()
+        self.last_predict_time = time.time()
         
         # For smoothing the display box
         self.smoothed_bbox = bbox.copy().astype(float)
 
     def predict(self):
         predicted = self.kf.predict()
-        self.age += 1
         self.time_since_update += 1
+        self.last_predict_time = time.time()
         
-        # Damp velocity during occlusion to keep predicted box stable
-        if self.time_since_update > 1:
-             self.kf.x[4:] *= 0.9
-             # Re-predict is complex, but we can just let it settle
+        # Robust Velocity Damping: 
+        # If occluded or missing detections, slowly kill the velocity components
+        # to prevent the box from 'flying away' into space.
+        # Progressively kill velocity [dx1, dy1, dx2, dy2] if we haven't seen the face for a while.
+        # Threshold increased to 30 frames (~1s at 30fps) to account for inference throttle
+        # and brief head twists/occlusions without losing momentum too early.
+        if self.time_since_update > 30:
+             decay = max(0.5, 0.95 ** (self.time_since_update - 1))
+             self.kf.x[4:] *= decay
         
         # Damping for display
         alpha = 0.8
@@ -104,6 +113,7 @@ class DeepSortTrack:
         
         self.hits += 1
         self.time_since_update = 0
+        self.last_update_time = time.time()
         self.smoothed_bbox = bbox.copy().astype(float)
         
         from config import TRACKER_N_INIT
@@ -112,9 +122,11 @@ class DeepSortTrack:
 
     @property
     def is_stale(self) -> bool:
-        from config import FACE_MAX_INACTIVE_S, INPUT_FPS
-        # time_since_update is incremented in predict() which runs every loop iteration (~INPUT_FPS)
-        return (self.time_since_update / float(INPUT_FPS)) > FACE_MAX_INACTIVE_S 
+        from config import FACE_MAX_INACTIVE_S
+        # USE REAL TIME instead of frame-ticks to avoid FPS mismatch issues
+        # Especially when processing (5fps) is slower than input (30fps)
+        elapsed = time.time() - self.last_update_time
+        return elapsed > FACE_MAX_INACTIVE_S 
 
     @property
     def last_seen(self) -> float:
@@ -123,7 +135,7 @@ class DeepSortTrack:
 
     @property
     def avg_embedding(self) -> np.ndarray:
-        return self.embedding
+        return self.face_embedding
 
 class DeepSortTracker:
     def __init__(self):
@@ -160,7 +172,8 @@ class DeepSortTracker:
         if not detections:
             # Just age existing tracks
             for tid, track in list(self.tracks.items()):
-                if track.time_since_update > self.max_age:
+                # Delete strictly by REAL TIME staleness
+                if track.is_stale:
                     track.state = 2
             self.tracks = {tid: t for tid, t in self.tracks.items() if t.state != 2}
             return
@@ -265,7 +278,8 @@ class DeepSortTracker:
 
         # 4. Handle Unmatched Tracks (Ageing)
         for tid in unmatched_tracks:
-            if self.tracks[tid].time_since_update > self.max_age:
+            # Delete strictly by REAL TIME staleness
+            if self.tracks[tid].is_stale:
                 self.tracks[tid].state = 2 # Deleted
 
         # Cleanup Deleted Tracks
