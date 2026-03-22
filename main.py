@@ -2,6 +2,8 @@ import os
 import sys
 import socket
 import threading
+import subprocess
+import atexit
 
 # ============================================================================
 # GPU BOOTSTRAP — Must run before any ONNX/InsightFace/CUDA import.
@@ -9,27 +11,41 @@ import threading
 # the active LD_LIBRARY_PATH depending on the shell environment.
 # We also include the venv nvidia packages as a secondary source.
 # ============================================================================
-def _bootstrap_cuda_library_path():
-    venv_site = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "venv", "lib", "python3.12", "site-packages"
-    )
-    candidate_dirs = [
-        "/usr/lib/x86_64-linux-gnu",           # System cuDNN 9.19.1
-        "/usr/local/cuda/lib64",               # CUDA toolkit libs
-        "/usr/local/cuda-12.0/lib64",
-        os.path.join(venv_site, "nvidia", "cudnn",         "lib"),
-        os.path.join(venv_site, "nvidia", "cublas",        "lib"),
-        os.path.join(venv_site, "nvidia", "cuda_runtime",  "lib"),
-    ]
+def _bootstrap():
+    root = os.path.dirname(os.path.abspath(__file__))
+    venv_python = os.path.normpath(os.path.join(root, ".venv", "bin", "python3"))
+    is_venv = hasattr(sys, 'real_prefix') or (sys.base_prefix != sys.prefix)
+    
+    # 1. Choose target executable (Prefer .venv)
+    target_exe = venv_python if (not is_venv and os.path.exists(venv_python)) else sys.executable
+    
+    # 2. Build LD_LIBRARY_PATH for GPU
+    candidate_dirs = []
+    
+    # Auto-discover all nvidia venv libs (cudnn, cublas, nvjitlink, etc.)
+    # VENV LIBS FIRST to avoid system symbol conflicts (e.g. libnvJitLink)
+    venv_site = os.path.join(root, ".venv", "lib", "python3.12", "site-packages")
+    nvidia_root = os.path.join(venv_site, "nvidia")
+    if os.path.isdir(nvidia_root):
+        for sub in os.listdir(nvidia_root):
+            lib_path = os.path.join(nvidia_root, sub, "lib")
+            if os.path.isdir(lib_path):
+                candidate_dirs.append(lib_path)
+    
+    # System libs LAST
+    candidate_dirs.extend(["/usr/lib/x86_64-linux-gnu", "/usr/local/cuda/lib64"])
     current = os.environ.get("LD_LIBRARY_PATH", "")
     existing = set(current.split(":")) if current else set()
     additions = [d for d in candidate_dirs if os.path.isdir(d) and d not in existing]
-    if additions:
-        os.environ["LD_LIBRARY_PATH"] = ":".join(additions) + ((":" + current) if current else "")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+    
+    # 3. Restart if executable changed or environment needs update
+    if (target_exe != sys.executable) or additions:
+        if additions:
+            os.environ["LD_LIBRARY_PATH"] = ":".join(additions) + ((":" + current) if current else "")
+        # print(f"[*] Bootstrapping environment via {target_exe}")
+        os.execv(target_exe, [target_exe] + sys.argv)
 
-_bootstrap_cuda_library_path()
+_bootstrap()
 
 # ============================================================================
 # Normal imports — GPU libs are now resolvable by the dynamic linker
@@ -53,6 +69,5 @@ if __name__ == "__main__":
     print(f"* Streaming API: ws://{IP}:{SERVER_PORT}/api/ws/stream")
     print("*" * 50)
 
-    # Note: NiceGUI's ui.run() is blocking. 
     # The streaming server is mounted inside nice_gui.py
     run_nicegui()

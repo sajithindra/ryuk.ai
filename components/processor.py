@@ -10,7 +10,7 @@ import shlex
 from typing import Callable, List, Dict, Optional
 
 from core.state import cache, cache_str
-from core.ai_processor import face_app
+import core.serialization as serde
 import core.watchdog_indexer as watchdog
 from components.face_tracker import FaceTracker
 from config import (
@@ -54,9 +54,9 @@ class Processor:
         # Callbacks for detections (Multiple Listeners Support)
         self.listeners = set() # Set of objects with on_detection, on_stream_start, on_inactive
         
-        # Start persistent worker (it will wait for .start() to set running=True)
-        self._inf_worker_thread = threading.Thread(target=self._persistent_inf_worker, daemon=True)
-        self._inf_worker_thread.start()
+        # Start persistent result poller
+        self._result_worker_thread = threading.Thread(target=self._pipeline_result_worker, daemon=True)
+        self._result_worker_thread.start()
 
     def start(self):
         self.running = True
@@ -133,8 +133,9 @@ class Processor:
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|strict;experimental"
                 cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
                 if not cap.isOpened():
-                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM")
+                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM: {self.source_url}")
                     return
+                print(f"DEBUG: Processor ({self.client_id}) - RTSP Stream Opened successfully.")
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             def grabber():
@@ -198,7 +199,11 @@ class Processor:
                 # Original Redis Pull
                 raw = cache.get(frame_key)
                 if raw:
+                    print(f"DEBUG: Processor ({self.client_id}) - Found Redis frame: {len(raw)} bytes")
                     frame = self._decode_frame(raw)
+                else:
+                    if self._frame_count % 100 == 0:
+                        print(f"DEBUG: Processor ({self.client_id}) - Waiting for Redis frame: {frame_key}")
             
             if frame is not None:
                 if not is_active:
@@ -211,16 +216,25 @@ class Processor:
 
                 self._frame_count = (self._frame_count + 1) % 10_000
                 
-                # Trigger persistent worker (Non-blocking)
-                if not self._is_inf_running and (self._frame_count % INFERENCE_THROTTLE == 0):
+                # Push to Micro-Pipeline (Non-blocking)
+                if self._frame_count % INFERENCE_THROTTLE == 0:
                     try:
-                        # Non-blocking put. If queue full, older frame is still being processed
-                        self._inf_queue.put_nowait(frame.copy())
-                    except queue.Full:
-                        pass
-                else:
-                    with self._inf_lock:
-                        self._tracker.predict()
+                        packet = {
+                            "client_id": self.client_id,
+                            "frame_count": self._frame_count,
+                            "timestamp": time.time(),
+                            "frame": frame.copy()
+                        }
+                        # We use rpush for the ingestion queue
+                        cache.rpush("ryuk:ingest", serde.pack(packet))
+                        # Limit queue size to prevent blowup if services are down
+                        if cache.llen("ryuk:ingest") > 100:
+                            cache.lpop("ryuk:ingest")
+                    except Exception as e:
+                        print(f"DEBUG: Processor ({self.client_id}) — Failed to push to pipeline: {e}")
+                
+                with self._inf_lock:
+                    self._tracker.predict()
 
                 # Get latest track states for drawing (Skip stale ones for real-time responsiveness)
                 faces_to_draw = []
@@ -269,148 +283,88 @@ class Processor:
             ffmpeg_proc.terminate()
             ffmpeg_proc.wait(timeout=1.0)
 
-    def _persistent_inf_worker(self):
-        """Persistent worker thread to avoid the overhead of spawning new threads."""
-        while True: # Keep thread alive for entire app lifecycle
+    def _pipeline_result_worker(self):
+        """Polls Redis for latest pipeline results and updates tracker."""
+        res_key = f"stream:{self.client_id}:results"
+        print(f"DEBUG: Processor ({self.client_id}) — Result worker started on {res_key}")
+        
+        while True:
             try:
-                inf_frame = self._inf_queue.get(timeout=1.0)
-            except queue.Empty:
-                continue
+                # We poll the results key. 
+                # Alternative: Use Redis Pub/Sub for lower latency notifications
+                data = cache.get(res_key)
+                if data:
+                    packet = serde.unpack(data)
+                    if not packet:
+                        continue
+                    # Consume results (clear key so we don't process same result twice)
+                    cache.delete(res_key)
+                    
+                    faces = packet.get('faces', [])
+                    search_results = packet.get('search_results', [])
+                    
+                    # We need to map search_results (identities) back to face objects
+                    # so tracker can see them.
+                    for i, face in enumerate(faces):
+                        if i < len(search_results):
+                            # The 'result' from search.py might be the identity meta
+                            if isinstance(face, dict):
+                                face['ident_meta'] = search_results[i]
+                            else:
+                                face.ident_meta = search_results[i]
+
+                    with self._inf_lock:
+                        # Trackers update() logic expects raw_faces (list of insightface.Face)
+                        # and scale (inf_frame to original frame).
+                        # In our packet, bboxes are already scaled to original? 
+                        # No, let's check detector.py.
+                        # detector.py takes frame as is. If Processor sends scaled frame, it's scaled.
+                        # Processor sends 'frame.copy()' from main loop.
+                        # Main loop 'frame' is native resolution (e.g. 1080p).
+                        # So scale in tracker.update should be 1.0.
+                        tracked = self._tracker.update(faces, inf_scale=1.0)
+                        
+                        # Apply identity logic similar to _run_inference but decoupled
+                        for item in tracked:
+                            track = item["track"]
+                            raw_face = item["raw_face"] 
+                            
+                            # Support both dict access (from msgpack) and attribute access (Face object)
+                            if isinstance(raw_face, dict):
+                                meta = raw_face.get("ident_meta")
+                            else:
+                                meta = getattr(raw_face, "ident_meta", None)
+                                
+                            if meta and meta.get("name") != "Unknown":
+                                track.pinned_identity = meta
+                            track.id_cache = meta
+
+                            # Signal UI listeners
+                            if meta and "aadhar" in meta:
+                                for l in list(self.listeners):
+                                    if hasattr(l, 'on_detection'):
+                                        l.on_detection({'client_id': self.client_id, 'detections': [meta]})
                 
-            if inf_frame is not None:
-                try:
-                    self._is_inf_running = True
-                    # Run AI in background
-                    start_time = time.time()
-                    self._run_inference(inf_frame)
-                    latency = (time.time() - start_time) * 1000
-                    print(f"PERF: Processor ({self.client_id}) — GPU Inference Complete: {latency:.2f}ms")
-                except Exception as e:
-                    print(f"Processor ({self.client_id}): AI Worker Error — {e}")
-                finally:
-                    self._is_inf_running = False
-
-    def _run_inference(self, frame: np.ndarray) -> List[Dict]:
-        from config import MAX_INFERENCE_SIZE
-        h, w = frame.shape[:2]
-        # Optimize: MAX_INFERENCE_SIZE (typically 640px) is the sweet spot for buffalo_l GPU compute
-        scale = min(MAX_INFERENCE_SIZE / w, MAX_INFERENCE_SIZE / h)
-        inf_frame = (cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
-                     if scale != 1.0 else frame)
-        if scale >= 1.0:
-            scale = 1.0
-
-        raw_faces = face_app.get(inf_frame)
-        
-        # CPU OPTIMIZATION: Removed 180-degree rotation fallback. 
-        # Running inference twice per frame when no faces are detected is extremely 
-        # expensive and was likely causing significant CPU spikes.
-        
-        with self._inf_lock:
-            tracked = self._tracker.update(raw_faces, scale)
-            parsed_faces = []
-
-            for item in tracked:
-                track = item["track"]
-                track_id = item["track_id"]
-                raw_face = item["raw_face"]
-                bbox = track.smoothed_bbox.astype(int)
-
-                # STICKY IDENTITY: If already pinned, skip recognition to save CPU/prevent flicker
-                if track.pinned_identity:
-                    name = track.pinned_identity.get("name", "Unknown")
-                    threat = track.pinned_identity.get("threat_level", "Low")
-                    meta = track.pinned_identity
-                else:
-                    name, threat, meta = self._recognise(track, track_id)
-                    # PIN: If we successfully recognized them, lock it to this track
-                    if meta and meta.get("name") != "Unknown":
-                        track.pinned_identity = meta
-
-                # CRITICAL: Store in track so main thread can see it immediately
-                track.id_cache = meta
-
-                if meta and hasattr(raw_face, "pose"):
-                    aadhar = meta.get("aadhar")
-                    self._try_auto_augment(aadhar, raw_face)
-
-                aadhr = meta.get("aadhar") if meta else None
-                if aadhr:
-                    self._try_log(aadhr)
-                if threat == "High":
-                    self._try_alert(name)
-
-                parsed_faces.append({
-                    "bbox": bbox,
-                    "name": name,
-                    "threat": threat,
-                })
-
-            self._tracker.prune_stale()
-        return parsed_faces
+                # Sleep to prevent tight loop
+                time.sleep(0.05)
+                
+            except Exception as e:
+                print(f"DEBUG: Processor ({self.client_id}) — Result Worker Error: {e}")
+                time.sleep(1)
 
     def _get_cached_identity(self, track) -> tuple[str, str, dict | None]:
         """Helper to get name/threat from track cache or last AI results."""
-        emb = track.avg_embedding
-        emb_hash = hash(emb.tobytes()) & 0xFFFF_FFFF_FFFF_FFFF
-        cache_key = f"cache:face:{emb_hash}"
-        cached = cache_str.get(cache_key)
-        if cached:
-            meta = json.loads(cached)
-            return meta.get("name", "Unknown"), meta.get("threat_level", "Low"), meta
-        return "Unknown", "Low", None
+        if track.pinned_identity:
+            return track.pinned_identity.get("name", "Unknown"), \
+                   track.pinned_identity.get("threat_level", "Low"), \
+                   track.pinned_identity
 
-    def _recognise(self, track, track_id: int) -> tuple[str, str, dict | None]:
-        emb = track.avg_embedding
-        emb_hash = hash(emb.tobytes()) & 0xFFFF_FFFF_FFFF_FFFF
-        cache_key = f"cache:face:{emb_hash}"
-        cached = cache_str.get(cache_key)
-
-        if cached:
-            meta = json.loads(cached)
-            return meta.get("name", "Unknown"), meta.get("threat_level", "Low"), meta
-
-        res = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD)
-        if res and "aadhar" in res:
-            for l in list(self.listeners):
-                if hasattr(l, 'on_detection'):
-                    l.on_detection(res)
-            # Store in redis cache for other components
-            cache_str.set(cache_key, json.dumps(res), ex=int(FACE_CACHE_TTL_S))
-            return res.get("name", "Unknown"), res.get("threat_level", "Low"), res
-        
-        # If we got a score but it's below threshold, log it once for signal debugging
-        if res and "score" in res and res["score"] > 0.1:
-             print(f"BIO-LOG: Weak Signal — Max Score: {res['score']:.2f} (Threshold: {FAISS_THRESHOLD})")
+        if track.id_cache:
+            return track.id_cache.get("name", "Unknown"), \
+                   track.id_cache.get("threat_level", "Low"), \
+                   track.id_cache
 
         return "Unknown", "Low", None
-
-    def _try_log(self, aadhar: str):
-        lock_key = f"log_lock:{aadhar}:{self.client_id}"
-        if not cache_str.get(lock_key):
-            watchdog.log_activity(aadhar, self.client_id)
-            cache_str.set(lock_key, "1", ex=int(LOG_COOLDOWN_S))
-
-    def _try_alert(self, name: str):
-        lock_key = f"alert_lock:{name}:{self.client_id}"
-        if not cache_str.get(lock_key):
-            msg = json.dumps({
-                "type":      "SECURITY_ALERT",
-                "message":   f"High Security Alert: {name} spotted at {self.client_id}",
-                "name":      name,
-                "source":    self.client_id,
-                "timestamp": time.time(),
-            })
-            cache.publish("security_alerts", msg)
-            cache_str.set(lock_key, "1", ex=int(ALERT_COOLDOWN_S))
-
-    def _try_auto_augment(self, aadhar: str, face_obj):
-        pose = face_obj.pose
-        if any(abs(angle) > AUTO_AUGMENT_TILT_DEG for angle in pose):
-            lock_key = f"aug_lock:{aadhar}"
-            if not cache_str.get(lock_key):
-                watchdog.augment_identity(aadhar, face_obj.embedding)
-                cache_str.set(lock_key, "1", ex=3600)
 
     def _draw_frame(self, frame: np.ndarray, faces: List[Dict]):
         from config import VIDEO_DRAW_THICKNESS_SCALE, VIDEO_FONT_SCALE_BASE

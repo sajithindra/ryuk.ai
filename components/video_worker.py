@@ -20,6 +20,7 @@ from config import (
     FAISS_THRESHOLD,
     AUTO_AUGMENT_MIN_SIM,
     AUTO_AUGMENT_TILT_DEG,
+    FRAME_SKIP,
 )
 
 
@@ -83,6 +84,13 @@ class VideoProcessor(QThread):
             raw = cache.get(frame_key)
 
             if raw:
+                self._frame_count = (self._frame_count + 1) % 10_000
+                
+                # Frame-level optimization: Skip decoding/processing if not on target frame
+                if self._frame_count % FRAME_SKIP != 0:
+                    self.msleep(5)
+                    continue
+
                 frame = self._decode_frame(raw)
                 if frame is None:
                     self.msleep(5)
@@ -91,24 +99,31 @@ class VideoProcessor(QThread):
                 last_frame_time = time.time()
                 if not is_active:
                     is_active = True
-
-                self._frame_count = (self._frame_count + 1) % 10_000
                 
-                # Non-blocking inference trigger
+                # Predict track positions every frame for KF stability
+                with self._inf_lock:
+                    self._tracker.predict()
+
+                # Trigger inference if not already running
                 if not self._is_inf_running and (self._frame_count % INFERENCE_THROTTLE == 0):
                     self._is_inf_running = True
-                    # Launch inference in background thread
-                    t = threading.Thread(
-                        target=self._async_inf_worker, 
-                        args=(frame.copy(),), 
-                        daemon=True
-                    )
+                    t = threading.Thread(target=self._async_inf_worker, args=(frame.copy(),), daemon=True)
                     t.start()
 
-                # Always draw the LATEST known face bboxes
-                # This ensures the video never pauses for AI "thinking"
+                # Draw LATEST track states for real-time responsiveness
+                faces_to_draw = []
                 with self._inf_lock:
-                    faces_to_draw = list(self._last_faces)
+                    for tid, track in list(self._tracker._tracks.items()):
+                        if track.is_stale: continue
+                        
+                        meta = track.pinned_identity if track.pinned_identity else track.id_cache
+                        name = meta.get("name", "Unknown") if meta else "Unknown"
+                        display_name = f"[{tid}] {name}"
+                        faces_to_draw.append({
+                            "bbox": track.smoothed_bbox.astype(int),
+                            "name": display_name,
+                            "threat": meta.get("threat_level", "Low") if meta else "Low"
+                        })
 
                 self._draw_frame(frame, faces_to_draw)
                 self._emit_frame(frame)
@@ -149,8 +164,11 @@ class VideoProcessor(QThread):
         if scale >= 1.0:
             scale = 1.0
 
-        raw_faces    = face_app.get(inf_frame)
-        tracked      = self._tracker.update(raw_faces, scale)
+        results = face_app.get(inf_frame)
+        tracked = self._tracker.update(
+            results.get("faces", []), 
+            inf_scale=scale
+        )
         parsed_faces = []
 
         for item in tracked:
@@ -159,9 +177,31 @@ class VideoProcessor(QThread):
             raw_face = item["raw_face"]
             
             bbox     = track.smoothed_bbox.astype(int)
+ 
+            # Calculate lighting from face crop
+            bbox_raw = raw_face.bbox.astype(int)
+            ih, iw = inf_frame.shape[:2]
+            y1, y2 = max(0, bbox_raw[1]), min(ih, bbox_raw[3])
+            x1, x2 = max(0, bbox_raw[0]), min(iw, bbox_raw[2])
+            
+            brightness = 0.5
+            if y2 > y1 and x2 > x1:
+                face_crop = inf_frame[y1:y2, x1:x2]
+                brightness = float(np.mean(face_crop) / 255.0)
+
+            context = {
+                "brightness": brightness,
+                "pose": getattr(raw_face, "pose", [0, 0, 0]).tolist(),
+                "norm": float(np.linalg.norm(raw_face.embedding))
+            }
 
             # Potential slow DB/Network call
-            name, threat, meta = self._recognise(track, track_id)
+            name, threat, meta = self._recognise(track, track_id, context=context)
+            
+            # PIN IDENTITY: If we found a valid person, lock it to this track
+            if meta and meta.get("name") != "Unknown":
+                track.pinned_identity = meta
+            track.id_cache = meta
 
             if meta and hasattr(raw_face, "pose"):
                 aadhar = meta.get("aadhar")
@@ -182,21 +222,19 @@ class VideoProcessor(QThread):
         self._tracker.prune_stale()
         return parsed_faces
 
-    def _recognise(self, track, track_id: int) -> tuple[str, str, dict | None]:
-        """Return (name, threat_level, meta). Uses Redis cache first."""
+    def _recognise(self, track, track_id: int, context: dict | None = None) -> tuple[str, str, dict | None]:
+        """Return (name, threat_level, meta). Uses FAISS directly."""
+        # DETECT ONCE: If this track already has a verified identity, skip the search
+        if track.pinned_identity:
+            return track.pinned_identity.get("name", "Unknown"), \
+                   track.pinned_identity.get("threat_level", "Low"), \
+                   track.pinned_identity
+
         emb       = track.avg_embedding
-        emb_hash  = hash(emb.tobytes()) & 0xFFFF_FFFF_FFFF_FFFF
-        cache_key = f"cache:face:{emb_hash}"
-        cached    = cache_str.get(cache_key)
-
-        if cached:
-            meta   = json.loads(cached)
-            return meta.get("name", "Unknown"), meta.get("threat_level", "Low"), meta
-
-        identity = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD)
+ 
+        identity = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD, context=context)
         if identity:
             self.person_identified.emit(identity)
-            cache_str.set(cache_key, json.dumps(identity), ex=int(FACE_CACHE_TTL_S))
             return identity.get("name", "Unknown"), identity.get("threat_level", "Low"), identity
 
         return "Unknown", "Low", None

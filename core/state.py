@@ -30,7 +30,7 @@ _string_pool = ConnectionPool(
 # "stream:{client_id}:frame" -> Binary JPEG data (String with TTL)  [binary pool]
 # "registry:active_streams"  -> Set of client IDs                   [binary pool]
 # "signal:new_stream"        -> List for Pub/Sub-like notifications  [binary pool]
-# "cache:face:{hash}"        -> Identity JSON string (TTL 10s)       [string pool]
+# "cache:face:{hash}"        -> (Removed) Embedding hash cache deleted
 # "cooldown:log:{a}:{c}"     -> Cooldown flag (TTL 120s)             [string pool]
 # "cache:cam_loc:{client_id}"-> Camera location JSON (TTL 3600s)     [string pool]
 

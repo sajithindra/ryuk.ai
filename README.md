@@ -50,8 +50,8 @@ Contains the central business logic and agentic frameworks:
 1. **Environment Setup**: Python 3.8+ (Tested on 3.12) is recommended.
 2. **Install Dependencies**:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
 3. **Run the Platform**:

@@ -15,7 +15,7 @@ import io
 import urllib.parse
 
 from core.state import cache, cache_str
-from core.database import get_sync_db, profiles_col, cameras_col, devices_col, init_db
+from core.database import get_sync_db, profiles_col, cameras_col, init_db
 from core.server import app as streaming_app
 from core.watchdog_indexer import get_all_profiles, delete_profile, register_camera_metadata
 from components.processor import Processor
@@ -611,7 +611,7 @@ class NiceDashboard:
             except Exception as e:
                 self._add_log_entry("SYSTEM", f"UI logic error: {str(e)}", "red")
 
-    async def _handle_stream_actual_start(self, client_id):
+    def _handle_stream_actual_start(self, client_id):
         # Trigger the actual stream start in the backend
         try:
             self._add_log_entry("IMAGE", f"Processing pipeline activated for {client_id}", "green")
@@ -662,13 +662,13 @@ class NiceDashboard:
                         dev_name = di.get('device_display_name') or di.get('device_name', 'Unnamed Node')
                         info_str = f"NAME: {dev_name}\nOS: {di.get('platform', 'Unknown')}\nAGENT: {di.get('user_agent','Unknown')[:50]}..."
                         
-                        card.device_display.set_text(f"{dev_name} // {di.get('platform', 'Unk')}")
+                        card.device_tooltip.set_text(f"{dev_name} // {di.get('platform', 'Unk')}")
                         with card.device_tooltip:
                             ui.tooltip(info_str).classes('bg-black/95 text-blue-300 font-mono text-[9px] whitespace-pre')
                     else:
                         # RTSP Device fallback
                         dev_name = f"Cam-{client_id}"
-                        card.device_display.set_text(f"{dev_name} // RTSP")
+                        card.device_tooltip.set_text(f"{dev_name} // RTSP")
                         with card.device_tooltip:
                              ui.tooltip(f"RTSP source: {client_id}").classes('bg-black/95 text-blue-300 font-mono text-[9px]')
 
@@ -717,7 +717,6 @@ class NiceDashboard:
         client_id = data.get('client_id')
         detections = data.get('detections', [])
         
-        self._add_log_entry("REDIS", f"Reading identification vectors from {client_id}", "blue")
         
         for metadata in detections:
             aadhar = metadata.get("aadhar")

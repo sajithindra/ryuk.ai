@@ -13,3 +13,5 @@ nicegui
 redis
 motor
 pyyaml
+torch
+torchvision

@@ -13,14 +13,18 @@ import cv2
 import pickle
 import numpy as np
 import faiss
+import threading
 import base64
 import json
 from datetime import datetime, timedelta
+from collections import deque
 
 from config import (
     DATA_DIR, IDENTITIES_PKL, FAISS_THRESHOLD,
     LOG_COOLDOWN_S, CAM_LOC_TTL_S, MAX_POSES_PER_ID,
-    AUTO_AUGMENT_MIN_SIM, AUTO_AUGMENT_TILT_DEG
+    AUTO_AUGMENT_MIN_SIM, AUTO_AUGMENT_TILT_DEG,
+    ADAPTIVE_THRESHOLD_ENABLED, ADAPTIVE_MIN_THRESHOLD,
+    ADAPTIVE_MAX_THRESHOLD, SCORE_HISTORY_SIZE
 )
 from core.ai_processor import face_app
 from core.database import get_sync_db
@@ -37,8 +41,10 @@ class WatchdogIndexer:
     """
 
     def __init__(self):
+        self._faiss_res = faiss.StandardGpuResources()
         self._faiss_index = None
         self._faiss_mapping: list[dict] = []
+        self._lock = threading.Lock()
         self._db = None
         self._profiles_col  = None
         self._cameras_col   = None
@@ -46,6 +52,11 @@ class WatchdogIndexer:
         self._connect_db()
         self._migrate_pickle()
         self._migrate_embeddings_schema()
+        
+        # Adaptive Thresholding Distribution Tracking
+        self._unknown_scores = deque(maxlen=SCORE_HISTORY_SIZE)
+        self._known_scores   = deque(maxlen=SCORE_HISTORY_SIZE)
+
         self.update_index()
 
     # ------------------------------------------------------------------
@@ -135,8 +146,9 @@ class WatchdogIndexer:
             return
 
         if not identities:
-            self._faiss_index   = None
-            self._faiss_mapping = []
+            with self._lock:
+                self._faiss_index   = None
+                self._faiss_mapping = []
             return
 
         embeddings, mapping = [], []
@@ -158,21 +170,47 @@ class WatchdogIndexer:
                 mapping.append(person_meta)
 
         if not embeddings:
-            self._faiss_index = None
-            self._faiss_mapping = []
+            with self._lock:
+                self._faiss_index = None
+                self._faiss_mapping = []
             return
 
         mat = np.array(embeddings, dtype="float32")
+        # Ensure contiguous memory layout for FAISS
+        mat = np.ascontiguousarray(mat)
+        
+        # Safety normalization (in case some DB entries are legacy/unnormalized)
         norms = np.linalg.norm(mat, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1.0, norms)
         mat /= norms
 
-        idx = faiss.IndexFlatIP(512)
-        idx.add(mat)
+        # HNSW Index for production querying
+        # Use inner product (requires normalized vectors)
+        cpu_idx = faiss.IndexHNSWFlat(512, 32, faiss.METRIC_INNER_PRODUCT)
+        cpu_idx.add(mat)
 
-        self._faiss_index   = idx
-        self._faiss_mapping = mapping
-        print(f"FAISS: Loaded {len(embeddings)} vectors for {len(identities)} identities.")
+        # HNSWFlat is highly optimized for CPU but not directly implemented on GPU.
+        # It provides ultra-fast search times even on CPU for 512D vectors.
+        # Note: faiss.index_cpu_to_gpu does not support cloning IndexHNSWFlat to GPU.
+        
+        # Atomic Swap (Zero-Downtime)
+        with self._lock:
+            self._faiss_index = cpu_idx
+            self._faiss_mapping = mapping
+        
+        # Signal change via Redis
+        try:
+            cache.set("ryuk:index:version", str(time.time()))
+        except Exception:
+            pass
+            
+        print(f"FAISS: (Shadow Index Synced) Loaded {len(embeddings)} vectors for {len(identities)} identities.")
+
+    def rebuild_index_background(self):
+        """Launches update_index in a daemon thread."""
+        thread = threading.Thread(target=self.update_index, daemon=True)
+        thread.start()
+        return thread
 
     def enroll_face(self, image_path: str, aadhar: str, name: str,
                     threat_level: str = "Low", phone: str = "", address: str = ""):
@@ -219,7 +257,7 @@ class WatchdogIndexer:
                 },
                 "$push": {
                     "embeddings": {
-                        "$each": [embedding.tobytes()],
+                        "$each": [embedding.astype(np.float32).tobytes()],
                         "$slice": -MAX_POSES_PER_ID  # Keep last N poses
                     }
                 }
@@ -228,36 +266,111 @@ class WatchdogIndexer:
         )
         
         # Incremental Index Update
-        norm = np.linalg.norm(embedding)
-        norm_emb = (embedding / norm).astype("float32") if norm > 0 else embedding.astype("float32")
-        
-        if self._faiss_index is None:
-            self.update_index()
-        else:
-            self._faiss_index.add(np.array([norm_emb], dtype="float32"))
-            self._faiss_mapping.append({
-                "aadhar": aadhar, "name": name, "threat_level": threat_level,
-                "phone": phone, "address": address, "photo_thumb": thumb_b64
-            })
+        # embedding is already normalized from face_app.get(frame)
+        norm_emb = np.ascontiguousarray(embedding.astype(np.float32))
+        # Update FAISS index
+        with self._lock:
+            if self._faiss_index is None:
+                self.update_index()
+            else:
+                self._faiss_index.add(np.array([norm_emb], dtype="float32"))
+                self._faiss_mapping.append({
+                    "aadhar": aadhar, "name": name, "threat_level": threat_level,
+                    "phone": phone, "address": address, "photo_thumb": thumb_b64
+                })
         
         print(f"FAISS: Enrolled {name} (Incremental update).")
 
+
     def recognize_face(self, embedding: np.ndarray,
-                       threshold: float = FAISS_THRESHOLD) -> dict | None:
-        """Query FAISS index. Returns metadata dict or None."""
-        if self._faiss_index is None or self._faiss_index.ntotal == 0:
+                       threshold: float = FAISS_THRESHOLD, **kwargs) -> dict | None:
+        """Query FAISS GPU Index directly."""
+        # 1. Slow Path: FAISS GPU Index
+        # Atomic snapshot of index/mapping for search consistency
+        with self._lock:
+            index = self._faiss_index
+            mapping = self._faiss_mapping
+
+        if index is None or index.ntotal == 0:
             return None
-        norm = np.linalg.norm(embedding)
-        if norm > 0:
-            embedding = embedding / norm
-        query = np.array([embedding], dtype="float32")
-        sims, idxs = self._faiss_index.search(query, k=1)
+        
+        # Extract quality metric from embedding norm if not provided
+        # NOTE: embedding is already normalized (L2=1.0) and float32 from GlobalAIProcessor
+        query = np.ascontiguousarray(embedding.reshape(1, -1).astype(np.float32))
+        sims, idxs = index.search(query, k=1)
         score = float(sims[0][0])
-        if score > threshold and idxs[0][0] != -1:
-            meta = self._faiss_mapping[idxs[0][0]].copy()
-            meta['score'] = score
-            return meta
-        return {'score': score} if idxs[0][0] != -1 else None
+        
+        # Calculate Adaptive Threshold
+        context = kwargs.get("context", {}).copy()
+        if "norm" not in context:
+            # Fallback if norm missing, though SearchService should provide it
+            context["norm"] = 30.0 
+            
+        current_threshold = self._calculate_adaptive_threshold(context) if threshold == FAISS_THRESHOLD else threshold
+        
+        # BIO-LOG: Distribution tracking
+        result = None
+        if score > current_threshold and idxs[0][0] != -1:
+            result = mapping[idxs[0][0]].copy()
+            result['score'] = score
+            self._known_scores.append(score)
+        elif idxs[0][0] != -1:
+            result = {'score': score}
+            # Only track as noise if it's a realistic face match (score > 0.1)
+            if score > 0.1:
+                self._unknown_scores.append(score)
+
+        # Logging for system observability
+        if score > 0.2:
+            print(f"BIO-LOG: Score: {score:.3f} | Threshold: {current_threshold:.3f} | {'MATCH' if result and result.get('aadhar') else 'REJECT'}")
+
+        return result
+
+        return result
+
+    def _calculate_adaptive_threshold(self, context: dict | None = None) -> float:
+        """
+        Dynamically adjust the threshold based on environmental factors 
+        and historical score distribution.
+        """
+        base_threshold = FAISS_THRESHOLD
+        
+        if not ADAPTIVE_THRESHOLD_ENABLED:
+            return base_threshold
+
+        # 1. Statistical Noise Floor (moving average of recent unknown scores)
+        # If the environment is noisy, we push the threshold higher.
+        if len(self._unknown_scores) > 10:
+             noise_floor = np.mean(self._unknown_scores) + (1.5 * np.std(self._unknown_scores))
+             base_threshold = max(base_threshold, noise_floor)
+
+        if not context:
+            return base_threshold
+
+        # 2. Lighting Penalty (U-shaped penalty)
+        # Optimal brightness is ~0.5. Very dark (<0.2) or very bright (>0.8) is penalized.
+        brightness = context.get("brightness", 0.5)
+        lighting_penalty = 0.0
+        if brightness < 0.35:
+            lighting_penalty = (0.35 - brightness) * 0.4  # Penalty for low light
+        elif brightness > 0.75:
+             lighting_penalty = (brightness - 0.75) * 0.3  # Penalty for over-exposure
+        
+        # 3. Embedding Quality (InsightFace 'norm')
+        # Typical norms for good detections are 25-35. Below 18 is risky.
+        norm = context.get("norm", 30.0)
+        quality_penalty = 0.0
+        if norm < 20.0:
+            quality_penalty = (20.0 - norm) * 0.01  # Penalty for low resolution/quality
+            
+        # 4. Pose Penalty (Yaw/Pitch/Roll)
+        # Frontal faces are (0,0,0). Angles > 25 degrees are penalized.
+        pose = context.get("pose", [0, 0, 0])
+        pose_penalty = sum(max(0, abs(angle) - 25) for angle in pose) * 0.001 
+        
+        adaptive_threshold = base_threshold + lighting_penalty + quality_penalty + pose_penalty
+        
+        return float(np.clip(adaptive_threshold, ADAPTIVE_MIN_THRESHOLD, ADAPTIVE_MAX_THRESHOLD))
 
     def log_activity(self, aadhar: str, client_id: str):
         """Record a timestamped detection, gated by a Redis cooldown key."""
@@ -356,7 +469,7 @@ class WatchdogIndexer:
             {
                 "$push": {
                     "embeddings": {
-                        "$each": [embedding.tobytes()],
+                        "$each": [embedding.astype(np.float32).tobytes()],
                         "$slice": -MAX_POSES_PER_ID
                     }
                 }
@@ -364,18 +477,29 @@ class WatchdogIndexer:
         )
         
         # Incremental Index Update
-        norm = np.linalg.norm(embedding)
-        norm_emb = (embedding / norm).astype("float32") if norm > 0 else embedding.astype("float32")
-        
-        if self._faiss_index is None:
-            self.update_index()
-        else:
-            self._faiss_index.add(np.array([norm_emb], dtype="float32"))
-            # We need to find the meta for this aadhar to keep mapping consistent
-            meta = next((m for m in self._faiss_mapping if m["aadhar"] == aadhar), {"aadhar": aadhar})
-            self._faiss_mapping.append(meta)
+        # embedding is already normalized from face_app.get()
+        norm_emb = np.ascontiguousarray(embedding.astype(np.float32))
+        # Update FAISS index
+        with self._lock:
+            if self._faiss_index is None:
+                self.update_index()
+            else:
+                self._faiss_index.add(np.array([norm_emb], dtype="float32"))
+                # We need to find the meta for this aadhar to keep mapping consistent
+                meta = next((m for m in self._faiss_mapping if m["aadhar"] == aadhar), {"aadhar": aadhar})
+                self._faiss_mapping.append(meta)
             
         print(f"Watchdog: Augmented {aadhar} with new pose (Incremental).")
+
+    def delete_camera(self, client_id: str):
+        if self._cameras_col is None:
+            return
+        self._cameras_col.delete_one({"client_id": client_id})
+        # Clean up Redis cache for this camera
+        loc_key   = f"cache:cam_loc:{client_id}"
+        dev_key   = f"cache:cam_dev:{client_id}"
+        cache_str.delete(loc_key, dev_key)
+        print(f"MongoDB: Deleted Camera {client_id}")
 
     def register_camera_metadata(self, client_id: str, locations: list):
         if self._cameras_col is None:
@@ -397,9 +521,10 @@ class WatchdogIndexer:
 _indexer = WatchdogIndexer()
 
 def update_faiss_index():           _indexer.update_index()
+def rebuild_index_background():     return _indexer.rebuild_index_background()
 def enroll_face(*a, **kw):          _indexer.enroll_face(*a, **kw)
-def recognize_face(emb, threshold=FAISS_THRESHOLD):
-    return _indexer.recognize_face(emb, threshold)
+def recognize_face(emb, threshold=FAISS_THRESHOLD, **kwargs):
+    return _indexer.recognize_face(emb, threshold, **kwargs)
 def log_activity(aadhar, client_id): _indexer.log_activity(aadhar, client_id)
 def get_all_profiles():             return _indexer.get_all_profiles()
 def delete_profile(aadhar):         _indexer.delete_profile(aadhar)
@@ -407,6 +532,7 @@ def update_profile(aadhar, data):   _indexer.update_profile(aadhar, data)
 def get_activity_report(aadhar, limit=50, days_ago=None):
     return _indexer.get_activity_report(aadhar, limit, days_ago)
 def augment_identity(aadhar, emb): _indexer.augment_identity(aadhar, emb)
+def delete_camera(cid):             _indexer.delete_camera(cid)
 def register_camera_metadata(cid, locs): _indexer.register_camera_metadata(cid, locs)
 
 # Legacy aliases kept for any direct attribute access

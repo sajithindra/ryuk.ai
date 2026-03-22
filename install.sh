@@ -50,16 +50,16 @@ fi
 
 # 2. Virtual Environment Setup
 echo -e "\n${GREEN}[2/6] Setting up virtual environment...${NC}"
-if [ -d "venv" ]; then
-    echo -e "Virtual environment 'venv' already exists. Skipping creation."
+if [ -d ".venv" ]; then
+    echo -e "Virtual environment '.venv' already exists. Skipping creation."
 else
-    python3 -m venv venv
-    echo -e "Created 'venv' directory."
+    python3 -m venv .venv
+    echo -e "Created '.venv' directory."
 fi
 
 # 3. Installing Python Packages
 echo -e "\n${GREEN}[3/6] Installing Python dependencies...${NC}"
-source venv/bin/activate
+source .venv/bin/activate
 pip install --upgrade pip
 
 if [ -f "requirements.txt" ]; then
@@ -183,6 +183,6 @@ echo -e "\n${GREEN}====================================================${NC}"
 echo -e "${GREEN}            Installation Finished Successfully!      ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 echo -e "\nTo start the application:"
-echo -e "1. ${YELLOW}source venv/bin/activate${NC}"
+echo -e "1. ${YELLOW}source .venv/bin/activate${NC}"
 echo -e "2. ${YELLOW}python main.py${NC}"
 echo -e "\nNote: Services (Redis & MongoDB) have been started and enabled."

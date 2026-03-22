@@ -21,21 +21,47 @@ DB_NAME    = "ryuk_ai"
 # ---------------------------------------------------------------------------
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR       = os.path.join(BASE_DIR, "data")
+MODELS_DIR     = os.path.join(DATA_DIR, "models")
 TRT_CACHE_DIR  = os.path.join(DATA_DIR, "trt_cache")
 IDENTITIES_PKL = os.path.join(DATA_DIR, "identities.pkl")
+
+
 
 # ---------------------------------------------------------------------------
 # Face recognition
 # ---------------------------------------------------------------------------
-FAISS_THRESHOLD       = 0.40   # Refined for maximum detection sensitivity
+FAISS_THRESHOLD       = 0.40   # Base threshold for recognition
+ADAPTIVE_THRESHOLD_ENABLED = True
+ADAPTIVE_MIN_THRESHOLD = 0.35  # Never go below this (too sensitive)
+ADAPTIVE_MAX_THRESHOLD = 0.60  # Never go above this (too conservative)
+SCORE_HISTORY_SIZE     = 100   # Sliding window for distribution tracking
+
 MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
-INFERENCE_THROTTLE    = 1      # Set to 1 for maximum GPU utilization
-FACE_MAX_INACTIVE_S   = 1.0    # Refined from 2.0 for better responsiveness
-FACE_TRACK_MAX_DIST   = 150    # Max centroid distance for track matching
+FACE_MAX_INACTIVE_S   = 10.0   # Allowed to stay for 10s without detection
+FACE_TRACK_MAX_DIST   = 200    # Increased for fast movement
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
-MAX_INFERENCE_SIZE    = 640    # High-quality detection for GPU
+
+# GLOBAL AI PROCESSOR BATCHING
+AI_BATCH_SIZE = 4            # Number of cameras/frames to batch together
+AI_BATCH_TIMEOUT_MS = 10     # Max wait time for a batch to fill (ms)
+
+# Performance/Throttling
+INPUT_FPS        = 30        # Expected camera input FPS
+PROCESSING_FPS   = 5         # Target processing/display FPS
+FRAME_SKIP       = INPUT_FPS // PROCESSING_FPS
+
+INFERENCE_THROTTLE = 1       # Process every Nth frame (Detect/Embed) relative to PROCESSING_FPS
+MAX_INFERENCE_SIZE = 640     # Optimal for TensorRT/InsightFace
+
+# DeepSORT Tracking
+TRACKER_MAX_AGE = 300         # Sustained for 10s at 30fps
+TRACKER_N_INIT  = 3          # Min frames to confirm a track
+TRACKER_MATCH_THRESHOLD = 0.7 # Cosine distance threshold for appearance matching
+TRACKER_IOU_THRESHOLD   = 0.3 # IoU threshold for spatial matching
+
+
 
 # ---------------------------------------------------------------------------
 # Redis TTLs & cooldowns

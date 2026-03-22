@@ -11,7 +11,6 @@ db = client[DB_NAME]
 # Collection Handles
 profiles_col = db["profiles"]
 cameras_col = db["cameras"]
-devices_col = db["devices"]
 activity_logs_col = db["activity_logs"]
 
 async def init_db():
@@ -21,7 +20,6 @@ async def init_db():
         await client.admin.command('ping')
         await profiles_col.create_index("aadhar", unique=True)
         await cameras_col.create_index("client_id", unique=True)
-        await devices_col.create_index("ip", unique=True)
         await activity_logs_col.create_index([("aadhar", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)])
         await activity_logs_col.create_index([("client_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)])
         print("MongoDB: Database and indexes initialized.")
