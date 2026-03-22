@@ -304,9 +304,6 @@ class NiceDashboard:
         self.right_toggle_btn.set_visibility(not self.right_panel_visible)
 
     def _add_log_entry(self, source, message, color):
-        if source.upper() == "SYSTEM":
-            return
-            
         with self.log_container:
             with ui.row().classes('w-full no-wrap gap-4 intel-item p-3'):
                 ui.label(datetime.now().strftime("%H:%M:%S")).classes('text-[10px] font-mono opacity-40 mt-1')
