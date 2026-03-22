@@ -57,6 +57,8 @@ class Processor:
         # Start persistent result poller
         self._result_worker_thread = threading.Thread(target=self._pipeline_result_worker, daemon=True)
         self._result_worker_thread.start()
+        
+        self._last_ui_update = 0.0
 
     def start(self):
         self.running = True
@@ -68,7 +70,8 @@ class Processor:
         self.running = False
         if hasattr(self, '_ffmpeg_proc_ref') and self._ffmpeg_proc_ref:
             try:
-                self._ffmpeg_proc_ref.terminate()
+                # _ffmpeg_proc_ref is an HwDecoder instance, call its stop() method
+                self._ffmpeg_proc_ref.stop()
             except:
                 pass
 
@@ -86,12 +89,16 @@ class Processor:
     def _run(self):
         last_frame_time = 0.0
         is_active = False
-        frame_key = f"stream:{self.client_id}:frame"
+        
+        # Substream/Main Stream split logic
+        sub_key = f"stream:{self.client_id}:sub:frame"
+        main_key = f"stream:{self.client_id}:main:frame"
+        legacy_key = f"stream:{self.client_id}:frame"
         
         # Pull model (RTSP) vs Push model (Redis)
         cap = None
         grabber_thread = None
-        ffmpeg_proc = None
+        hw_decoder = None
         latest_frame_data = {"frame": None, "lock": threading.Lock(), "running": True}
 
         if self.source_url:
@@ -106,27 +113,12 @@ class Processor:
                     print(f"DEBUG: Processor ({self.client_id}) — Resolution discovery failed: {e}. Falling back to 1080p.")
                     native_w, native_h = 1920, 1080
 
-                print(f"DEBUG: Processor ({self.client_id}) — Launching FFmpeg CUDA Decoder Pipe: {self.source_url}")
-                # FFmpeg command for GPU decoding (NVDEC) at NATIVE resolution
-                # Removed scale_cuda=640:640 to allow full quality display
-                cmd = (
-                    f"ffmpeg -hwaccel cuda -hwaccel_output_format cuda -rtsp_transport tcp "
-                    f"-i {shlex.quote(self.source_url)} "
-                    f"-vf 'hwdownload,format=nv12,format=bgr24' "
-                    f"-f rawvideo -pix_fmt bgr24 -"
-                )
-                
-                ffmpeg_proc = subprocess.Popen(
-                    shlex.split(cmd), 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.DEVNULL,
-                    bufsize=10**7
-                )
-                self._ffmpeg_proc_ref = ffmpeg_proc # Save reference for stop()
-                
-                # We use native resolution for display/drawing, 
-                # but we'll scale to 640x640 later just for inference.
-                w, h = native_w, native_h 
+                print(f"DEBUG: Processor ({self.client_id}) — Launching HwDecoder for RTSP: {self.source_url}")
+                from core.hw_decoder import HwDecoder
+                hw_decoder = HwDecoder(native_w, native_h, codec="h264_cuvid")
+                hw_decoder.start(source=self.source_url)
+                self._ffmpeg_proc_ref = hw_decoder # Save for stop()
+                w, h = native_w, native_h
                 
             else:
                 print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream (OpenCV Backend): {self.source_url}")
@@ -135,33 +127,23 @@ class Processor:
                 if not cap.isOpened():
                     print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM: {self.source_url}")
                     return
-                print(f"DEBUG: Processor ({self.client_id}) - RTSP Stream Opened successfully.")
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             def grabber():
-                nonlocal ffmpeg_proc
-                if ffmpeg_proc:
-                    # Use discovered native resolution
-                    frame_size = w * h * 3
-                    
+                if hw_decoder:
                     while self.running and latest_frame_data["running"]:
-                        raw_frame = ffmpeg_proc.stdout.read(frame_size)
-                        if not raw_frame or len(raw_frame) != frame_size:
-                            print(f"DEBUG: Processor ({self.client_id}) - FFmpeg Pipe Break. Retrying...")
-                            ffmpeg_proc.terminate()
+                        frame = hw_decoder.read_frame()
+                        if frame is None:
+                            print(f"DEBUG: Processor ({self.client_id}) - HwDecoder Read Break. Retrying...")
+                            hw_decoder.restart(source=self.source_url)
                             time.sleep(1.0)
-                            ffmpeg_proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                             continue
-                        
-                        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((h, w, 3))
                         
                         with latest_frame_data["lock"]:
                             latest_frame_data["frame"] = frame.copy()
                 else:
-                    # Original OpenCV grabber
                     while self.running and latest_frame_data["running"]:
                         if not cap.grab():
-                            print(f"DEBUG: Processor ({self.client_id}) - RTSP Grab Failed. Retrying...")
                             time.sleep(1.0)
                             cap.open(self.source_url, cv2.CAP_FFMPEG)
                             continue
@@ -180,6 +162,9 @@ class Processor:
             grabber_thread = threading.Thread(target=grabber, daemon=True)
             grabber_thread.start()
 
+        # Redis-based JPEG Decoder (NVDEC)
+        jpeg_hw_decoder = None
+
         while self.running:
             frame = None
             
@@ -189,21 +174,30 @@ class Processor:
                     latest_frame_data["frame"] = None # Consume
                 
                 if frame is None:
-                    # Optional: print(f"DEBUG: Processor ({self.client_id}) - Waiting for frame...")
-                    time.sleep(0.001) # Ultra-short sleep
+                    time.sleep(0.001)
                     continue
-                
-                # Debug: Frame received
-                # print(f"DEBUG: Processor ({self.client_id}) - Consumed frame for processing.")
             else:
-                # Original Redis Pull
-                raw = cache.get(frame_key)
-                if raw:
-                    print(f"DEBUG: Processor ({self.client_id}) - Found Redis frame: {len(raw)} bytes")
-                    frame = self._decode_frame(raw)
-                else:
+                # Optimized Redis Pull with Substream/Main split
+                # Processor (this class) is primarily for UI display, so it pulls SUBSTREAM
+                raw_sub = cache.get(sub_key) or cache.get(legacy_key)
+                if raw_sub:
+                    if USE_FFMPEG_CUDA:
+                        if jpeg_hw_decoder is None:
+                            # Auto-detect resolution from first frame (CPU decode once)
+                            temp_frame = self._decode_frame(raw_sub)
+                            if temp_frame is not None:
+                                h_sub, w_sub = temp_frame.shape[:2]
+                                from core.hw_decoder import JpegBatchDecoder
+                                jpeg_hw_decoder = JpegBatchDecoder(w_sub, h_sub)
+                                frame = temp_frame
+                        else:
+                            frame = jpeg_hw_decoder.decode(raw_sub)
+                    else:
+                        frame = self._decode_frame(raw_sub)
+                
+                if frame is None:
                     if self._frame_count % 100 == 0:
-                        print(f"DEBUG: Processor ({self.client_id}) - Waiting for Redis frame: {frame_key}")
+                        print(f"DEBUG: Processor ({self.client_id}) - Waiting for Redis frame: {sub_key}")
             
             if frame is not None:
                 if not is_active:
@@ -238,6 +232,10 @@ class Processor:
 
                 # Get latest track states for drawing (Skip stale ones for real-time responsiveness)
                 faces_to_draw = []
+                detections_to_sync = []
+                now = time.time()
+                should_sync_ui = (now - self._last_ui_update > 1.0)
+                
                 with self._inf_lock:
                     for tid, track in list(self._tracker._tracks.items()):
                         # Skip if stale even if not yet pruned by background thread
@@ -250,11 +248,22 @@ class Processor:
                         if not meta:
                              _, _, meta = self._get_cached_identity(track)
                         
+                        # Sync identified tracks to UI listeners to keep cards alive
+                        if should_sync_ui and meta and "aadhar" in meta:
+                            detections_to_sync.append(meta)
+                        
                         faces_to_draw.append({
                             "bbox": track.smoothed_bbox.astype(int),
                             "name": meta.get("name", "Unknown") if meta else "Unknown",
                             "threat": meta.get("threat_level", "Low") if meta else "Low"
                         })
+
+                if should_sync_ui:
+                    self._last_ui_update = now
+                    if detections_to_sync:
+                        for l in list(self.listeners):
+                            if hasattr(l, 'on_detection'):
+                                l.on_detection({'client_id': self.client_id, 'detections': detections_to_sync})
 
                 self._draw_frame(frame, faces_to_draw)
                 encoded = self._encode_frame(frame)

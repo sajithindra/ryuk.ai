@@ -33,9 +33,9 @@ class EnrollmentView(QFrame):
         # Header
         hdr = QVBoxLayout()
         t = QLabel("WATCHDOG ENROLLMENT")
-        t.setStyleSheet("color: #F8FAFC; font-size: 18px; font-weight: 700;")
+        t.setObjectName("EnrollmentHeader")
         s = QLabel("Register a new identity into the recognition network")
-        s.setStyleSheet("color: #64748B; font-size: 12px;")
+        s.setObjectName("EnrollmentSub")
         hdr.addWidget(t)
         hdr.addWidget(s)
         outer.addLayout(hdr)
@@ -58,25 +58,16 @@ class EnrollmentView(QFrame):
         self.photo_preview = QLabel("☻")
         self.photo_preview.setFixedSize(220, 220)
         self.photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.photo_preview.setStyleSheet("""
-            background: #1A1D2B; border: 1px dashed #334155;
-            border-radius: 12px; color: #334155; font-size: 40px;
-        """)
+        self.photo_preview.setObjectName("PhotoPreview")
 
         btn_browse = QPushButton("SELECT PHOTO")
         btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_browse.setStyleSheet("""
-            QPushButton {
-                background: #1A1D2B; border: 1px solid #334155;
-                color: #94A3B8; border-radius: 6px; padding: 10px;
-                font-size: 11px; font-weight: 600;
-            }
-            QPushButton:hover { border-color: #3B82F6; color: #3B82F6; }
-        """)
+        btn_browse.setObjectName("SecondaryBtn")
+        btn_browse.setMinimumHeight(40)
         btn_browse.clicked.connect(self._browse)
 
         self.img_path_label = QLabel("No photo selected")
-        self.img_path_label.setStyleSheet("color: #475569; font-size: 10px;")
+        self.img_path_label.setObjectName("UrlLabel")
         self.img_path_label.setWordWrap(True)
         self.img_path_label.setMaximumWidth(220)
 
@@ -91,14 +82,14 @@ class EnrollmentView(QFrame):
         col = QVBoxLayout()
 
         form = QFrame()
-        form.setStyleSheet("background: #1A1D2B; border-radius: 12px; border: 1px solid #2D3748;")
+        form.setObjectName("EnrollForm")
         fl = QVBoxLayout(form)
         fl.setContentsMargins(32, 32, 32, 32)
         fl.setSpacing(14)
 
         def _sec(txt):
             l = QLabel(txt)
-            l.setStyleSheet("color: #475569; font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-top: 8px;")
+            l.setObjectName("FormSectionHeader")
             return l
 
         self.name_input    = QLineEdit(); self.name_input.setPlaceholderText("Full Name")
@@ -111,15 +102,8 @@ class EnrollmentView(QFrame):
 
         self.btn_submit = QPushButton("ENROLL IDENTITY")
         self.btn_submit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_submit.setStyleSheet("""
-            QPushButton {
-                background-color: #3B82F6; color: #FFFFFF;
-                font-weight: 600; font-size: 13px;
-                padding: 14px; border-radius: 6px; border: none; margin-top: 8px;
-            }
-            QPushButton:hover { background-color: #2563EB; }
-            QPushButton:disabled { background-color: #1E293B; color: #475569; }
-        """)
+        self.btn_submit.setObjectName("ActionBtn")
+        self.btn_submit.setFixedHeight(48)
         self.btn_submit.clicked.connect(self._submit)
 
         fl.addWidget(_sec("IDENTITY DETAILS"))
@@ -153,9 +137,9 @@ class EnrollmentView(QFrame):
                                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                                Qt.TransformationMode.SmoothTransformation)
                 )
-                self.photo_preview.setStyleSheet(
-                    "background: #1A1D2B; border: 1px solid #3B82F6; border-radius: 12px;"
-                )
+                self.photo_preview.setProperty("hasImage", "true")
+                self.photo_preview.style().unpolish(self.photo_preview)
+                self.photo_preview.style().polish(self.photo_preview)
             except Exception:
                 pass
 
@@ -201,8 +185,7 @@ class EnrollmentView(QFrame):
         self.address_input.clear()
         self._selected_image = None
         self.img_path_label.setText("No photo selected")
-        self.photo_preview.setText("☻")
-        self.photo_preview.setStyleSheet("""
-            background: #1A1D2B; border: 1px dashed #334155;
-            border-radius: 12px; color: #334155; font-size: 40px;
-        """)
+        self.photo_preview.setText("+")
+        self.photo_preview.setProperty("hasImage", "false")
+        self.photo_preview.style().unpolish(self.photo_preview)
+        self.photo_preview.style().polish(self.photo_preview)

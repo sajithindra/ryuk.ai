@@ -22,6 +22,38 @@ class UnifiedInferenceEngine:
         self.running = False
         self.log_file = open("/tmp/ryuk_engine.log", "a")
         self.log("[UnifiedEngine] Initialized and connected to GlobalAIProcessor.")
+        self._decoders = {} # client_id -> JpegBatchDecoder
+        self._decoder_lock = threading.Lock()
+
+    def _get_decoder(self, client_id, first_frame_raw):
+        with self._decoder_lock:
+            if client_id not in self._decoders:
+                import cv2
+                from core.hw_decoder import JpegBatchDecoder
+                from config import USE_FFMPEG_CUDA
+                
+                if not USE_FFMPEG_CUDA:
+                    return None
+                
+                # Decode once on CPU to get dimensions
+                try:
+                    arr = np.frombuffer(first_frame_raw, np.uint8)
+                    temp = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if temp is not None:
+                        h, w = temp.shape[:2]
+                        self.log(f"[UnifiedEngine] Initializing HwDecoder for {client_id} ({w}x{h})")
+                        self._decoders[client_id] = {
+                            "decoder": JpegBatchDecoder(w, h),
+                            "last_used": time.time()
+                        }
+                    else:
+                        return None
+                except:
+                    return None
+            
+            entry = self._decoders[client_id]
+            entry["last_used"] = time.time()
+            return entry["decoder"]
 
     def log(self, msg):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -40,13 +72,21 @@ class UnifiedInferenceEngine:
         
         if frame is None and 'frame_bytes' in packet:
             # Decode frame if passed as bytes (from core/server.py)
-            try:
-                import cv2
-                arr = np.frombuffer(packet['frame_bytes'], np.uint8)
-                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            except Exception as e:
-                print(f"[UnifiedEngine] Decode Error: {e}")
-                return None
+            from config import USE_FFMPEG_CUDA
+            if USE_FFMPEG_CUDA:
+                decoder = self._get_decoder(client_id, packet['frame_bytes'])
+                if decoder:
+                    frame = decoder.decode(packet['frame_bytes'])
+                
+            if frame is None:
+                # Fallback to CPU if decoder failed or disabled
+                try:
+                    import cv2
+                    arr = np.frombuffer(packet['frame_bytes'], np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                except Exception as e:
+                    print(f"[UnifiedEngine] Decode Error: {e}")
+                    return None
                 
         if frame is None: return None
         
@@ -80,8 +120,14 @@ class UnifiedInferenceEngine:
                     
                 context = {
                     "pose": getattr(face, "pose", [0, 0, 0]) or [0, 0, 0],
-                    "norm": float(np.linalg.norm(emb))
+                    "norm": getattr(face, "det_score", 0.9) * 30.0 # Heuristic if not provided, but GlobalAIProcessor SHOULD provide it.
                 }
+                # Fix: If ai_processor already computed the norm, it might be in the face object or context.
+                # Actually, GlobalAIProcessor provides it if we add it. 
+                # For now, let's just make sure we don't re-compute it if we don't have to.
+                if hasattr(face, 'norm'):
+                    context["norm"] = float(face.norm)
+                
                 ident = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD, context=context)
                 search_results.append(ident if ident else {"name": "Unknown", "threat_level": "Low"})
         except Exception as e:
@@ -116,6 +162,17 @@ class UnifiedInferenceEngine:
         def worker():
             while self.running:
                 try:
+                    # RObust Frame Skipping: 
+                    # If queue is too long, we are lagging. Pop and discard older frames.
+                    q_len = cache.llen("ryuk:ingest")
+                    if q_len > AI_BATCH_SIZE * 4:
+                        # Batch discard: keep only the latest frames
+                        # We pop 'q_len - AI_BATCH_SIZE' items to leave a small buffer for batching
+                        to_discard = q_len - AI_BATCH_SIZE
+                        for _ in range(to_discard):
+                            cache.lpop("ryuk:ingest")
+                        # self.log(f"[UnifiedEngine] Lag Detected! Discarded {to_discard} stale frames.")
+
                     packed = cache.blpop("ryuk:ingest", timeout=1)
                     if not packed: continue
                     
@@ -123,6 +180,12 @@ class UnifiedInferenceEngine:
                     packet = serde.unpack(data)
                     if not packet: continue
                     
+                    # 2. Frame Stale Check (Timestamp based)
+                    ts = packet.get('timestamp', 0)
+                    if ts > 0 and (time.time() - ts) > 0.5: # 500ms old is too stale for security
+                        # self.log(f"[UnifiedEngine] Frame Stale ({time.time()-ts:.2f}s), skipping.")
+                        continue
+
                     # Process the frame
                     result = self.process_frame(packet)
                     if result:
@@ -132,6 +195,10 @@ class UnifiedInferenceEngine:
                         # Logging
                         if result['frame_count'] % 50 == 0:
                             self.log(f"PERF: Processed {result['client_id']} | Faces: {len(result['faces'])} | Latency: {result['latency']:.2f}ms")
+
+                    # Periodically cleanup stale decoders (every 100 frames)
+                    if packet.get('frame_count', 0) % 100 == 0:
+                        self._cleanup_decoders()
                             
                 except Exception as e:
                     self.log(f"ERROR in Unified Engine Worker: {e}")
@@ -143,12 +210,21 @@ class UnifiedInferenceEngine:
             t = threading.Thread(target=worker, daemon=True)
             t.start()
             threads.append(t)
-            
+
         try:
             while self.running:
                 time.sleep(1)
         except KeyboardInterrupt:
             self.stop()
+
+    def _cleanup_decoders(self):
+        """Terminates decoders that haven't been used for 60 seconds."""
+        with self._decoder_lock:
+            now = time.time()
+            stale_keys = [k for k, v in self._decoders.items() if (now - v["last_used"]) > 60]
+            for k in stale_keys:
+                self.log(f"[UnifiedEngine] Cleaning up stale decoder for {k}")
+                del self._decoders[k]
 
     def stop(self):
         self.running = False

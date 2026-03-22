@@ -122,11 +122,15 @@ class DeepSortTrack:
 
     @property
     def is_stale(self) -> bool:
-        from config import FACE_MAX_INACTIVE_S
+        from config import FACE_MAX_INACTIVE_S, FACE_PINNED_MAX_INACTIVE_S
         # USE REAL TIME instead of frame-ticks to avoid FPS mismatch issues
         # Especially when processing (5fps) is slower than input (30fps)
         elapsed = time.time() - self.last_update_time
-        return elapsed > FACE_MAX_INACTIVE_S 
+        
+        # If we have a pinned identity, we allow the track to stay longer (e.g. 60s)
+        # to survive long occlusions or bad angles without losing the person.
+        threshold = FACE_PINNED_MAX_INACTIVE_S if self.pinned_identity else FACE_MAX_INACTIVE_S
+        return elapsed > threshold
 
     @property
     def last_seen(self) -> float:

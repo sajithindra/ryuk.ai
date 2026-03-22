@@ -44,12 +44,13 @@ MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
 FACE_MAX_INACTIVE_S   = 10.0   # Allowed to stay for 10s without detection
+FACE_PINNED_MAX_INACTIVE_S = 60.0 # How long to keep a PINNED (identified) track without detections
 FACE_TRACK_MAX_DIST   = 400    # Increased for fast movement and head twists
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
 
 # GLOBAL AI PROCESSOR BATCHING
 AI_BATCH_SIZE = 4            # Number of cameras/frames to batch together
-AI_BATCH_TIMEOUT_MS = 10     # Max wait time for a batch to fill (ms)
+AI_BATCH_TIMEOUT_MS = 1      # Reduced from 10ms to 1ms for < 12ms total latency
 
 # Performance/Throttling
 INPUT_FPS        = 30        # Expected camera input FPS

@@ -20,13 +20,10 @@ class EditProfileDialog(QMainWindow):
     def __init__(self, meta: dict, parent=None):
         super().__init__(parent)
         self.meta = meta
+        self.setObjectName("EditProfileDialog")
         self.setWindowTitle("EDIT BIOMETRIC PROFILE")
         self.setFixedSize(400, 560)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint)
-        self.setStyleSheet("""
-            QMainWindow { background-color: #0F111A; }
-            QLabel { color: #F8FAFC; }
-        """)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -35,13 +32,13 @@ class EditProfileDialog(QMainWindow):
         lay.setSpacing(12)
 
         hdr = QLabel("UPDATE PROFILE")
-        hdr.setStyleSheet("color: #F8FAFC; font-weight: 700; font-size: 16px;")
+        hdr.setObjectName("DialogHeader")
         lay.addWidget(hdr)
 
         # Circular photo
         photo = QLabel()
         photo.setFixedSize(90, 90)
-        photo.setStyleSheet("border-radius: 45px; background: #1A1D2B; border: 1px solid #334155;")
+        photo.setObjectName("DialogPhoto")
         photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         thumb = meta.get("photo_thumb", "")
         if thumb:
@@ -80,18 +77,15 @@ class EditProfileDialog(QMainWindow):
             ("RESIDENCE", self.address_in), ("SECURITY CLEARANCE", self.threat_in),
         ]:
             l = QLabel(lbl)
-            l.setStyleSheet("color: #475569; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;")
+            l.setObjectName("DialogLabel")
             lay.addWidget(l)
             lay.addWidget(widget)
 
         lay.addStretch()
 
         btn = QPushButton("SAVE CHANGES")
+        btn.setObjectName("ActionBtn")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet("""
-            QPushButton { background: #3B82F6; color: #FFFFFF; font-weight: 600; padding: 12px; border-radius: 6px; border: none; }
-            QPushButton:hover { background: #2563EB; }
-        """)
         btn.clicked.connect(self._save)
         lay.addWidget(btn)
 

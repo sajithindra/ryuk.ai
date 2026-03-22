@@ -286,23 +286,47 @@ class NiceDashboard:
             # 3. MAIN COMMAND GRID (Central Zone)
             with ui.column().classes('grow h-full p-0 relative'):
                 # Header Overlay
-                with ui.row().classes('w-full px-8 py-4 items-center justify-between z-10 telemetry-bar'):
+                with ui.row().classes('w-full px-12 py-6 items-center justify-between z-10'):
                     with ui.row().classes('items-center gap-4'):
                         # Left Toggle (if hidden)
                         self.left_toggle_btn = ui.button(icon='menu', on_click=lambda: self.toggle_left_panel()).props('flat round size=sm').classes('mr-2')
                         self.left_toggle_btn.set_visibility(False)
-                        ui.label("RYUK COMMAND CENTER").classes('font-black text-sm tracking-[2px] glow-text')
-                        ui.badge("STABLE").props('color=green-9 size=sm').classes('text-[10px] px-2')
+                        ui.label("RYUK COMMAND CENTER").classes('font-black text-2xl tracking-tighter glow-text uppercase')
+                        ui.badge("STABLE").props('color=green-9 size=sm').classes('text-[9px] px-2 font-black')
+                    
                     with ui.row().classes('items-center gap-6'):
-                        self.clock_label = ui.label().classes('font-mono text-[14px] font-bold opacity-90')
-                        with ui.row().classes('items-center gap-4 bg-black/20 px-4 py-1 rounded-full border border-white/5'):
-                            self.cpu_label = ui.label("CPU --%").classes('text-[11px] font-mono text-blue-400')
-                            self.mem_label = ui.label("MEM --%").classes('text-[11px] font-mono text-purple-400')
-                            self.gpu_label = ui.label("GPU --%").classes('text-[11px] font-mono text-green-400')
-                        # Right Toggle (if hidden)
-                        self.right_toggle_btn = ui.button(icon='analytics', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('ml-2')
+                        self.clock_label = ui.label().classes('font-mono text-[14px] font-black opacity-30')
+                        # Right Toggle + Globe
+                        self.right_toggle_btn = ui.button(icon='analytics', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('opacity-40')
                         self.right_toggle_btn.set_visibility(False)
-                        ui.icon('public', size='sm', color='white').classes('opacity-60')
+                        ui.icon('public', size='20px', color='white').classes('opacity-40')
+
+                # Layer 2: Tactical Pod (Refined)
+                with ui.row().classes('w-full px-12 py-8 items-stretch justify-start gap-10 bg-black/10 border-b border-white/5 backdrop-blur-3xl'):
+                    # Pod 1: COMPONENT HEALTH (Resource Matrix)
+                    with ui.card().classes('p-6 bg-white/5 border border-white/10 rounded-2xl gap-6 shadow-2xl flex-row items-center no-wrap'):
+                        with ui.column().classes('gap-0 border-r border-white/10 pr-6 mr-2'):
+                            ui.label("TAC").classes('text-[10px] font-black opacity-20 tracking-[2px]')
+                            ui.label("LOAD").classes('text-[10px] font-black opacity-20 tracking-[2px]')
+                        
+                        # CPU Pod
+                        with ui.column().classes('gap-0 items-start w-24'):
+                            ui.label("CPU UTIL").classes('text-[8px] font-black opacity-40 tracking-widest')
+                            self.cpu_label = ui.label("0.0%").classes('text-[20px] font-black text-blue-400 font-mono')
+                        
+                        # RAM Pod
+                        with ui.column().classes('gap-0 items-start w-24'):
+                            ui.label("MEM RESI").classes('text-[8px] font-black opacity-40 tracking-widest')
+                            self.mem_label = ui.label("0.0%").classes('text-[20px] font-black text-purple-400 font-mono')
+                            
+                        # GPU Pod
+                        with ui.column().classes('gap-0 items-start w-32'):
+                            ui.label("GPU ACCEL").classes('text-[8px] font-black opacity-40 tracking-widest')
+                            self.gpu_label = ui.label("0% | 0MB").classes('text-[20px] font-black text-green-400 font-mono')
+
+                    # Global HUD Glow (Visual only)
+                    ui.element('div').classes('absolute -top-20 -left-20 w-80 h-80 bg-blue-500/10 blur-[100px] pointer-events-none rounded-full')
+                    ui.element('div').classes('absolute -bottom-20 -right-20 w-80 h-80 bg-purple-500/10 blur-[100px] pointer-events-none rounded-full')
                 
                 # Dynamic Panels
                 with ui.tab_panels(ui.tabs().set_visibility(False), value=0).classes('w-full grow bg-transparent z-0') as self.panels:
@@ -513,20 +537,15 @@ class NiceDashboard:
                     with ui.row().classes('absolute top-3 left-3 items-center gap-2 pointer-events-none'):
                         card.rec_dot = ui.label("REC").classes('text-[11px] font-black text-red-500 animate-pulse')
                         # Client ID
-                        client_label = ui.label(client_id.upper()).classes('text-[11px] font-black tracking-[2px] opacity-70')
-                        with client_label:
+                        card.client_label = ui.label(client_id.upper()).classes('text-[11px] font-black tracking-[2px] opacity-70')
+                        with card.client_label:
                             ui.tooltip("Loading device info...").classes('bg-black/90 text-blue-300 font-mono text-[12px]')
-                            card.device_tooltip = client_label
+                            card.device_tooltip = card.client_label
                     
                     # Metadata Overlay (Bottom)
-                    with ui.column().classes('absolute bottom-4 left-4 gap-1 pointer-events-none'):
-                        card.status_label = ui.label("Signal offline").classes('text-[11px] font-black tracking-widest text-red-500')
-                        card.meta_label = ui.label("Searching...").classes('text-[11px] font-mono opacity-30')
-                
-                with ui.row().classes('w-full items-center p-3 px-4'):
-                    card.status_label = ui.label("Signal offline").classes('text-[8px] font-black tracking-widest text-red-500')
-                    ui.space()
-                    card.meta_label = ui.label("Searching...").classes('text-[8px] font-mono opacity-30')
+                    with ui.column().classes('absolute bottom-4 left-4 gap-0 pointer-events-none'):
+                        card.status_label_overlay = ui.label("Signal offline").classes('text-[10px] font-black tracking-widest text-red-500 uppercase')
+                        card.meta_label_overlay = ui.label("Searching...").classes('text-[10px] font-mono opacity-30')
         
         self.camera_cards[client_id] = card
         self.empty_label.set_visibility(False)
@@ -729,9 +748,16 @@ class NiceDashboard:
                     loc_list = cam.get("locations", [])
                     tactical_loc = loc_list[0] if loc_list else "RTSP SOURCE"
 
-            card.status_label.set_text(dev_name)
-            card.status_label.classes(replace='text-red-500 text-orange-500', add='text-green-500')
-            card.meta_label.set_text(tactical_loc)
+            # Update Overlay Labels
+            
+            # Update Overlay Labels
+            card.status_label_overlay.set_text(dev_name)
+            card.status_label_overlay.classes(replace='text-red-500 text-orange-500', add='text-green-500')
+            card.meta_label_overlay.set_text(tactical_loc)
+            card.meta_label_overlay.classes(replace='opacity-30', add='opacity-100')
+            
+            # Update Client ID color (Green when online)
+            card.client_label.classes(replace='opacity-70', add='text-green-500 opacity-100')
         
         self._add_log_entry("SIGNAL", f"STREAM LIVE: {client_id}", "green")
 
@@ -760,9 +786,16 @@ class NiceDashboard:
             card.stream_img.set_visibility(False)
             card.placeholder.set_visibility(True)
             card.rec_dot.set_visibility(False)
-            card.status_label.set_text("OFFLINE")
-            card.status_label.classes(replace='text-green-500', add='text-red-500')
-            card.meta_label.set_text("NO SIGNAL")
+            card.rec_dot.set_visibility(False)
+            
+            # Update Overlay Labels
+            card.status_label_overlay.set_text("Signal offline")
+            card.status_label_overlay.classes(replace='text-green-500 text-orange-500', add='text-red-500')
+            card.meta_label_overlay.set_text("NO SIGNAL")
+            card.meta_label_overlay.classes(replace='opacity-100', add='opacity-30')
+            
+            # Update Client ID color (Gray when offline)
+            card.client_label.classes(replace='text-green-500 opacity-100', add='opacity-70')
         
         self._add_log_entry("SIGNAL", f"CONNECTION LOST: {client_id}", "red")
 
@@ -1114,29 +1147,31 @@ class NiceDashboard:
         dialog.open()
 
     def _update_system_stats(self):
-        """Update CPU, GPU and RAM stats in the UI"""
+        """Update CPU, GPU and RAM stats with enhanced system insights"""
         try:
             import psutil
             import subprocess
+            import platform
             
-            # CPU and RAM
+            # 1. Basic CPU and RAM
             cpu_usage = psutil.cpu_percent()
             ram = psutil.virtual_memory()
             
-            # GPU stats using nvidia-smi
-            gpu_usage = "N/A"
-            vram_usage = "N/A"
+            # 2. GPU stat
+            gpu_usage = "0%"
+            vram_usage = "0MB"
+            
             try:
-                # nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits
+                # Get GPU Util and VRAM
                 res = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], encoding='utf-8')
                 parts = [p.strip() for p in res.split(',')]
                 if len(parts) >= 3:
                     gpu_usage = f"{parts[0]}%"
-                    vram_usage = f"{int(parts[1])}/{int(parts[2])}MB"
+                    vram_usage = f"{int(parts[1])}MB"
             except Exception:
                 pass
 
-            # Update Labels
+            # 4. Update UI Labels
             if hasattr(self, 'cpu_label'):
                 self.cpu_label.set_text(f"CPU: {cpu_usage}%")
             
@@ -1145,12 +1180,11 @@ class NiceDashboard:
                 self.mem_label.tooltip(f"MEM: {ram.used//(1024**2)}MB / {ram.total//(1024**2)}MB")
             
             if hasattr(self, 'gpu_label'):
-                self.gpu_label.set_text(f"GPU: {gpu_usage} | VRAM: {vram_usage}")
-                self.gpu_label.tooltip("NVIDIA SMI Real-time Telemetry")
+                self.gpu_label.set_text(f"{gpu_usage} | {vram_usage}")
 
             # Health pulse color logic
             if hasattr(self, 'health_icon'):
-                if cpu_usage > 80 or ram.percent > 90:
+                if cpu_usage > 100 or ram.percent > 95: # Extreme thresholds
                     self.health_icon.style('color: #FF3333 !important; opacity: 1;')
                 else:
                     self.health_icon.style('color: #00FF94 !important; opacity: 0.6;')

@@ -27,12 +27,9 @@ class CIView(QFrame):
         # Header
         hdr = QHBoxLayout()
         title = QLabel("CENTRAL INTELLIGENCE")
-        title.setStyleSheet("color: #F8FAFC; font-size: 18px; font-weight: 700;")
+        title.setObjectName("CIHeader")
         self.count_badge = QLabel("0 IDENTITIES")
-        self.count_badge.setStyleSheet("""
-            color: #10B981; background: rgba(16,185,129,0.1);
-            border-radius: 4px; padding: 4px 12px; font-size: 10px; font-weight: 600;
-        """)
+        self.count_badge.setObjectName("CountBadge")
         hdr.addWidget(title)
         hdr.addSpacing(12)
         hdr.addWidget(self.count_badge)

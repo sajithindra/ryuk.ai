@@ -55,12 +55,9 @@ class ActivityReportDialog(QMainWindow):
     def __init__(self, meta: dict, parent=None):
         super().__init__(parent)
         self.meta = meta
+        self.setObjectName("ActivityReportDialog")
         self.setWindowTitle(f"TACTICAL INTELLIGENCE | {meta.get('name','').upper()}")
         self.setFixedSize(900, 700)
-        self.setStyleSheet("""
-            QMainWindow { background-color: #0F111A; }
-            QLabel { color: #F8FAFC; }
-        """)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -71,7 +68,7 @@ class ActivityReportDialog(QMainWindow):
         # Left: log timeline
         left = QVBoxLayout()
         lbl_hdr = QLabel("CHRONOLOGICAL LOGS")
-        lbl_hdr.setStyleSheet("color: #94A3B8; font-weight: 700; font-size: 12px; margin-bottom: 10px;")
+        lbl_hdr.setObjectName("DialogHeader")
         left.addWidget(lbl_hdr)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -86,25 +83,19 @@ class ActivityReportDialog(QMainWindow):
         right = QVBoxLayout()
         ah = QHBoxLayout()
         ai_hdr = QLabel("AI TACTICAL DOSSIER")
-        ai_hdr.setStyleSheet("color: #94A3B8; font-weight: 700; font-size: 12px;")
+        ai_hdr.setObjectName("DialogHeader")
         self.timeframe_cb = QComboBox()
         self.timeframe_cb.addItems(["All Time", "Today", "Last 7 Days"])
         ah.addWidget(ai_hdr); ah.addWidget(self.timeframe_cb)
         right.addLayout(ah)
 
         self.btn_gen = QPushButton("GENERATE DOSSIER")
-        self.btn_gen.setStyleSheet("""
-            QPushButton { background: #3B82F6; color: #FFFFFF; font-weight: 600; padding: 10px; border-radius: 6px; border: none; }
-            QPushButton:hover { background: #2563EB; }
-        """)
+        self.btn_gen.setObjectName("ActionBtn")
         self.btn_gen.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_gen.clicked.connect(self._generate)
 
         self.btn_pdf = QPushButton("DOWNLOAD PDF")
-        self.btn_pdf.setStyleSheet("""
-            QPushButton { background: #10B981; color: #FFFFFF; font-weight: 600; padding: 10px; border-radius: 6px; border: none; }
-            QPushButton:hover { background: #059669; }
-        """)
+        self.btn_pdf.setObjectName("SecondaryBtn") # Using SecondaryBtn for PDF
         self.btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pdf.clicked.connect(self._download_pdf)
         self.btn_pdf.hide()
@@ -114,10 +105,7 @@ class ActivityReportDialog(QMainWindow):
 
         self.report_view = QTextEdit()
         self.report_view.setReadOnly(True)
-        self.report_view.setStyleSheet(
-            "background: #0F111A; border: 1px solid #1E293B; border-radius: 8px;"
-            "padding: 15px; color: #CBD5E1; font-size: 13px;"
-        )
+        self.report_view.setObjectName("DossierView")
         self.report_view.setPlaceholderText(
             "Awaiting command. Select a timeframe and generate the intelligence dossier."
         )
@@ -133,21 +121,32 @@ class ActivityReportDialog(QMainWindow):
         logs = watchdog.get_activity_report(self.meta["aadhar"])
         if not logs:
             lbl = QLabel("No activity recorded.")
-            lbl.setStyleSheet("color: #475569; font-size: 12px; font-style: italic;")
+            lbl.setObjectName("EmptyGridLabel")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.list_layout.addWidget(lbl)
             return
         for log in logs:
             row = QFrame()
-            rl = QVBoxLayout(row)
-            rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(2)
+            row.setFixedHeight(20)
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(8, 0, 8, 0); rl.setSpacing(10)
             locs = log.get("locations", ["Unknown", "Unknown"])
-            for txt, style in [
-                (log.get("date_str", "?"), "color: #3B82F6; font-weight: 600; font-size: 11px;"),
-                (f"📍 {locs[0]} ➔ {locs[1]}", "color: #F8FAFC; font-size: 12px;"),
-                (f"DEVICE: {log.get('client_id','?')}", "color: #475569; font-size: 10px;"),
-            ]:
-                l = QLabel(txt); l.setStyleSheet(style); rl.addWidget(l)
+            
+            l1 = QLabel(log.get("date_str", "?"))
+            l1.setObjectName("LogTime")
+            l1.setFixedWidth(60)
+            
+            l2 = QLabel(f"📍 {locs[0]} ➔ {locs[1]}")
+            l2.setObjectName("LogAction")
+            
+            l3 = QLabel(f"[{log.get('client_id','?')}]")
+            l3.setObjectName("LogMeta")
+            l3.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            
+            rl.addWidget(l1)
+            rl.addWidget(l2, 1)
+            rl.addWidget(l3)
+            
             self.list_layout.addWidget(row)
 
     def _generate(self):

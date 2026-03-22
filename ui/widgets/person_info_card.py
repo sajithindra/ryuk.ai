@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt
 
 
 def _threat_color(threat: str) -> str:
-    return {"High": "#FF5370", "Medium": "#FFB74D"}.get(threat, "#00E5C8")
+    return {"High": "#EF4444", "Medium": "#F59E0B"}.get(threat, "#3D7BFF")
 
 
 class PersonInfoCard(QFrame):
@@ -21,8 +21,10 @@ class PersonInfoCard(QFrame):
         tc     = _threat_color(threat)
 
         self.setObjectName("PersonCard")
-        # Keep threat dynamic indicator on the left
-        self.setStyleSheet(f"border-left: 2px solid {tc};")
+        self.setProperty("threat", threat)
+        # Apply property-based style refresh
+        self.style().unpolish(self)
+        self.style().polish(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -33,7 +35,7 @@ class PersonInfoCard(QFrame):
         photo = QLabel()
         photo.setFixedSize(48, 48)
         photo.setObjectName("PersonPhoto")
-        photo.setStyleSheet(f"border: 1px solid {tc}; border-radius: 24px; background: #0F111A;")
+        photo.setProperty("threat", threat)
         
         thumb = meta.get("photo_thumb", "")
         if thumb:
@@ -47,16 +49,17 @@ class PersonInfoCard(QFrame):
 
         name_col = QVBoxLayout()
         lbl_sub  = QLabel("IDENTIFIED")
-        lbl_sub.setStyleSheet("color: #64748B; font-size: 9px; font-weight: 600; letter-spacing: 1px;")
+        lbl_sub.setObjectName("IdentifiedSub")
         lbl_name = QLabel(meta.get("name", "Unknown Target").upper())
-        lbl_name.setStyleSheet("color: #F8FAFC; font-weight: 600; font-size: 14px;")
+        lbl_name.setObjectName("IdentifiedName")
         name_col.addWidget(lbl_sub)
         name_col.addWidget(lbl_name)
 
         badge = QLabel(threat.upper())
+        badge.setObjectName("ThreatBadge")
         badge.setFixedSize(64, 20)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet(f"background: {tc}20; color: {tc}; border-radius: 4px; font-size: 9px; font-weight: 600;")
+        badge.setProperty("threat", threat)
 
         hdr.addWidget(photo)
         hdr.addSpacing(10)
@@ -66,8 +69,8 @@ class PersonInfoCard(QFrame):
         layout.addLayout(hdr)
 
         sep = QFrame()
+        sep.setObjectName("CardSeparator")
         sep.setFixedHeight(1)
-        sep.setStyleSheet("background: #1E293B;")
         layout.addWidget(sep)
 
         # Attributes
@@ -80,10 +83,10 @@ class PersonInfoCard(QFrame):
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
             lk = QLabel(label)
-            lk.setStyleSheet("color: #64748B; font-weight: 600; font-size: 9px;")
-            lk.setFixedWidth(50)
+            lk.setObjectName("AttributeLabel")
+            lk.setFixedWidth(60)
             lv = QLabel(str(value))
-            lv.setStyleSheet("color: #CBD5E1; font-size: 12px;")
+            lv.setObjectName("AttributeValue")
             lv.setWordWrap(True)
             rl.addWidget(lk)
             rl.addWidget(lv, 1)

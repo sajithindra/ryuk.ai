@@ -56,6 +56,8 @@ class WatchdogIndexer:
         # Adaptive Thresholding Distribution Tracking
         self._unknown_scores = deque(maxlen=SCORE_HISTORY_SIZE)
         self._known_scores   = deque(maxlen=SCORE_HISTORY_SIZE)
+        self._cached_noise_floor = FAISS_THRESHOLD
+        self._last_stats_update  = 0
 
         self.update_index()
 
@@ -340,9 +342,13 @@ class WatchdogIndexer:
 
         # 1. Statistical Noise Floor (moving average of recent unknown scores)
         # If the environment is noisy, we push the threshold higher.
+        # OPTIMIZATION: Cache mean/std and update only periodically
         if len(self._unknown_scores) > 10:
-             noise_floor = np.mean(self._unknown_scores) + (1.5 * np.std(self._unknown_scores))
-             base_threshold = max(base_threshold, noise_floor)
+            if self._last_stats_update % 10 == 0:
+                noise_floor = np.mean(self._unknown_scores) + (1.5 * np.std(self._unknown_scores))
+                self._cached_noise_floor = max(FAISS_THRESHOLD, noise_floor)
+            self._last_stats_update += 1
+            base_threshold = self._cached_noise_floor
 
         if not context:
             return base_threshold

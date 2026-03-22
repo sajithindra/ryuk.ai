@@ -66,6 +66,7 @@ class StreamingServer:
         # Extract device details from headers and query params
         headers = dict(websocket.headers)
         query_params = dict(websocket.query_params)
+        stream_type = query_params.get("type", "main") # Default to main if not specified
         
         device_info = {
             "user_agent": headers.get("user-agent", "Unknown"),
@@ -73,7 +74,8 @@ class StreamingServer:
             "connection": headers.get("connection", "Unknown"),
             "platform": headers.get("sec-ch-ua-platform", "Unknown"),
             "query_params": query_params,
-            "device_name": query_params.get("name", "Unnamed Node")
+            "device_name": query_params.get("name", "Unnamed Node"),
+            "stream_type": stream_type
         }
 
         # Log connection to MongoDB (async)
@@ -85,7 +87,8 @@ class StreamingServer:
                 "port": port,
                 "device_info": device_info,
                 "last_connected": datetime.now(), 
-                "status": "online"
+                "status": "online",
+                "stream_type": stream_type
             }},
             upsert=True,
         )
@@ -95,21 +98,29 @@ class StreamingServer:
             while True:
                 data = await websocket.receive_bytes()
                 count += 1
-                if count <= 5 or count % 100 == 0:
-                    print(f"DEBUG: Camera {client_id} — Received frame {count} ({len(data)} bytes)")
-                cache.set(f"stream:{client_id}:frame", data, ex=5)
                 
-                # Push to Unified Inference Engine (Micro-Pipeline)
-                import core.serialization as serde
-                packet = {
-                    "client_id": client_id,
-                    "frame_count": count,
-                    "timestamp": datetime.now().timestamp(),
-                    "frame_bytes": data # Pass raw bytes to avoid double-encoding
-                }
-                cache.rpush("ryuk:ingest", serde.pack(packet))
-                if cache.llen("ryuk:ingest") > 50:
-                    cache.lpop("ryuk:ingest")
+                # Tagged routing based on stream type
+                if stream_type == "sub":
+                    cache.set(f"stream:{client_id}:sub:frame", data, ex=5)
+                else:
+                    cache.set(f"stream:{client_id}:main:frame", data, ex=5)
+                    # Legacy support: also set the main key for backward compat
+                    cache.set(f"stream:{client_id}:frame", data, ex=5)
+                    
+                    # Push ONLY main frames to the AI pipeline
+                    import core.serialization as serde
+                    packet = {
+                        "client_id": client_id,
+                        "frame_count": count,
+                        "timestamp": datetime.now().timestamp(),
+                        "frame_bytes": data 
+                    }
+                    cache.rpush("ryuk:ingest", serde.pack(packet))
+                    if cache.llen("ryuk:ingest") > 50:
+                        cache.lpop("ryuk:ingest")
+                
+                if count <= 5 or count % 100 == 0:
+                    print(f"DEBUG: Camera {client_id} ({stream_type}) — Received frame {count}")
         except WebSocketDisconnect:
             print(f"Camera {client_id} disconnected.")
         finally:

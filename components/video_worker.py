@@ -127,7 +127,8 @@ class VideoProcessor(QThread):
                         faces_to_draw.append({
                             "bbox": track.smoothed_bbox.astype(int),
                             "name": display_name,
-                            "threat": meta.get("threat_level", "Low") if meta else "Low"
+                            "threat": meta.get("threat_level", "Low") if meta else "Low",
+                            "embedding": track.avg_embedding
                         })
 
                 self._draw_frame(frame, faces_to_draw)
@@ -222,6 +223,7 @@ class VideoProcessor(QThread):
                 "bbox":  bbox,
                 "name":  name,
                 "threat": threat,
+                "embedding": raw_face.embedding
             })
 
         self._tracker.prune_stale()
@@ -284,18 +286,39 @@ class VideoProcessor(QThread):
             main_color   = (83, 83, 255) if threat == "High" else (200, 229, 0)
             text_color   = (255, 255, 255)
             
-            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_AA)
+            # cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_AA)
             
             label = f" {name.upper()} "
+            
+            # Format truncated vector string
+            emb = pf.get("embedding")
+            vec_str = ""
+            if emb is not None:
+                # Show first 6 and last 6 dims
+                v = emb.flatten()
+                truncated = list(v[:6]) + ["..."] + list(v[-6:])
+                vec_str = "VEC: " + " ".join([f"{x:.2f}" if isinstance(x, (float, np.float32)) else str(x) for x in truncated])
+
             font = cv2.FONT_HERSHEY_DUPLEX
-            font_scale = 0.5
-            thickness = 1
+            font_scale = 0.8  # Increased from 0.5
+            thickness = 2    # Increased from 1
+            
             (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
+            (vw, vh), _ = cv2.getTextSize(vec_str, font, font_scale * 0.7, thickness - 1)
+            
+            max_w = max(tw, vw)
+            total_h = th + vh + 15
             
             lx, ly = bbox[0], bbox[1] - 10
-            cv2.rectangle(frame, (lx, ly - th - 5), (lx + tw, ly + 5), (15, 10, 8), -1)
-            cv2.rectangle(frame, (lx, ly - th - 5), (lx + tw, ly + 5), main_color, 1, cv2.LINE_AA)
-            cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, thickness, cv2.LINE_AA)
+            # Background plate
+            cv2.rectangle(frame, (lx, ly - total_h), (lx + max_w + 10, ly + 10), (15, 10, 8), -1)
+            cv2.rectangle(frame, (lx, ly - total_h), (lx + max_w + 10, ly + 10), main_color, 1, cv2.LINE_AA)
+            
+            # Identity Label
+            cv2.putText(frame, label, (lx, ly - vh - 5), font, font_scale, text_color, thickness, cv2.LINE_AA)
+            # Vector String
+            if vec_str:
+                cv2.putText(frame, vec_str, (lx + 5, ly), font, font_scale * 0.7, main_color, thickness - 1, cv2.LINE_AA)
 
     def _emit_frame(self, frame: np.ndarray):
         h, w        = frame.shape[:2]

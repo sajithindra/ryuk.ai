@@ -27,6 +27,10 @@ class SystemHealthIndicator(QFrame):
         lay.addStretch()
 
     def update_status(self, redis_ok: bool, mongo_ok: bool):
-        _ok, _err = "#10B981", "#EF4444"
-        self.lbl_redis.setStyleSheet(f"color: {_ok if redis_ok else _err}; font-weight: 600; font-size: 10px;")
-        self.lbl_mongo.setStyleSheet(f"color: {_ok if mongo_ok else _err}; font-weight: 600; font-size: 10px;")
+        self.lbl_redis.setProperty("status", "online" if redis_ok else "offline")
+        self.lbl_mongo.setProperty("status", "online" if mongo_ok else "offline")
+        
+        # Refresh styles
+        for lbl in [self.lbl_redis, self.lbl_mongo]:
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)

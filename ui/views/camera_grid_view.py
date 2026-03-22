@@ -15,7 +15,6 @@ class CameraGridView(QScrollArea):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setObjectName("ContentArea")
-        self.setStyleSheet("border: none;")
 
         self._container = QWidget()
         self.grid = QGridLayout(self._container)
@@ -25,8 +24,8 @@ class CameraGridView(QScrollArea):
 
         # Empty state
         self.empty_label = QLabel("No active streams")
+        self.empty_label.setObjectName("EmptyGridLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet("color: #475569; font-size: 14px;")
         self.grid.addWidget(self.empty_label, 0, 0)
         self._card_count = 0
 

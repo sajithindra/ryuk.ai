@@ -164,24 +164,26 @@ class DashboardWindow(QMainWindow):
         lay.setContentsMargins(16, 0, 16, 0)
 
         logo = QLabel("RYUK")
-        logo.setStyleSheet("color: #3B82F6; font-weight: 700; font-size: 14px; letter-spacing: 2px;")
+        logo.setObjectName("Logo")
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #1E293B; border: none; background: #1E293B;")
+        sep.setObjectName("TopBarSeparator")
         sep.setFixedWidth(1)
 
         page_title = QLabel("CAMERA GRID")
-        page_title.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600; letter-spacing: 1px;")
+        page_title.setObjectName("PageTitle")
 
         clock = QLabel()
-        clock.setStyleSheet("color: #64748B; font-size: 11px;")
+        clock.setObjectName("Clock")
 
         url_lbl = QLabel(f"{self.ip_address}:{SERVER_PORT}")
-        url_lbl.setStyleSheet("color: #334155; font-size: 10px;")
+        url_lbl.setObjectName("UrlLabel")
 
         tb_redis = QLabel("● REDIS")
+        tb_redis.setObjectName("StatusLabel")
         tb_mongo = QLabel("● MONGO")
+        tb_mongo.setObjectName("StatusLabel")
 
         lay.addWidget(logo)
         lay.addSpacing(12)
@@ -427,9 +429,14 @@ class DashboardWindow(QMainWindow):
             print(f"Health Check: MongoDB Error - {e}")
 
         self.health_indicator.update_status(redis_ok, mongo_ok)
-        ok, err = "#00E5FF", "#FF5370"
-        self.tb_redis.setStyleSheet(f"color: {ok if redis_ok else err}; font-size: 10px; font-weight: 600;")
-        self.tb_mongo.setStyleSheet(f"color: {ok if mongo_ok else err}; font-size: 10px; font-weight: 600;")
+        ok, err = "#10B981", "#EF4444"
+        self.tb_redis.setProperty("status", "online" if redis_ok else "offline")
+        self.tb_mongo.setProperty("status", "online" if mongo_ok else "offline")
+        
+        # Refresh styles
+        for lbl in [self.tb_redis, self.tb_mongo]:
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
 
     # ------------------------------------------------------------------
     # Stylesheet
