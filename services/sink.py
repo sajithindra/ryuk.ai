@@ -109,8 +109,35 @@ def run_sink_service():
             cache.rpush(res_key, serde.pack(packet))
             cache.ltrim(res_key, -5, -1) # Keep only 5 recent results
             
+            # Route ALPR plate results back to the Processor for overlay drawing
+            plates = packet.get('plates', [])
+            if plates:
+                alpr_key = f"stream:{client_id}:alpr_results"
+                cache.rpush(alpr_key, json.dumps({"plates": plates}))
+                cache.ltrim(alpr_key, -5, -1)
+                
+                # Publish confirmed vehicle detections to the dashboard intelligence feed
+                for p in plates:
+                    plate_num = p.get('plate')
+                    if plate_num:  # Only publish confirmed OCR reads
+                        vehicle_event = {
+                            "type": "VEHICLE_DETECTION",
+                            "plate_number": plate_num,
+                            "vehicle_type": p.get('label', 'Vehicle'),
+                            "vehicle_color": p.get('vehicle_color', 'Unknown'),
+                            "camera_id": client_id,
+                            "source": client_id,
+                            "confidence": p.get('conf', 0.0),
+                            "timestamp": time.time(),
+                        }
+                        veh_lock = f"veh_lock:{plate_num}:{client_id}"
+                        if not cache_str.get(veh_lock):
+                            cache.publish("alpr:events", json.dumps(vehicle_event))
+                            cache_str.set(veh_lock, "1", ex=30)  # 30s cooldown per plate
+            
             if packet.get('frame_count', 0) % 50 == 0:
-                print(f"SINK: Finished processing {client_id} | Faces: {len(recognition)}")
+                n_plates = len(plates) if plates else 0
+                print(f"SINK: Finished {client_id} | Faces: {len(recognition)} | Vehicles: {n_plates}")
                 
         except Exception as e:
             print(f"ERROR in Sink Service: {e}")

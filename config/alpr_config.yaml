@@ -1,0 +1,28 @@
+# ALPR Configuration
+alpr:
+  detection:
+    model_path: "data/models/alpr/license_plate_detector.pt"
+    conf_threshold: 0.15
+    device: "cuda"
+    batch_size: 4
+  ocr:
+    lang: "en"
+    use_gpu: true
+    det_db_thresh: 0.2
+    rec_thresh: 0.3
+    normalize: true
+  tracking:
+    max_age: 30
+    n_init: 1
+  storage:
+    mongodb_uri: "mongodb://localhost:27017"
+    db_name: "alpr"
+    collection_name: "plates"
+    image_base_path: "storage/alpr"
+  cache:
+    redis_url: "redis://localhost:6379/0"
+    deduplication_ttl_sec: 30
+  pipeline:
+    target_fps: 5
+    motion_filter_enabled: true
+    motion_threshold: 500

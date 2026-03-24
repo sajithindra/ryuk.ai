@@ -17,3 +17,9 @@ torch
 torchvision
 psutil
 nvidia-ml-py
+ultralytics
+paddleocr
+paddlepaddle-gpu
+imutils
+filterpy
+scikit-learn

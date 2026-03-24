@@ -13,12 +13,15 @@ SERVICES = [
 ]
 
 def get_python_executable():
+    # Get project root (one level up from services/manager.py)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     # Prefer .venv if it exists, otherwise fall back to current sys.executable
     venv_paths = [
-        os.path.join(os.getcwd(), ".venv", "bin", "python3"),
-        os.path.join(os.getcwd(), ".venv", "bin", "python"),
-        os.path.join(os.getcwd(), "venv", "bin", "python3"),
-        os.path.join(os.getcwd(), "venv", "bin", "python")
+        os.path.join(root, ".venv", "bin", "python3"),
+        os.path.join(root, ".venv", "bin", "python"),
+        os.path.join(root, "venv", "bin", "python3"),
+        os.path.join(root, "venv", "bin", "python")
     ]
     for path in venv_paths:
         if os.path.exists(path):
@@ -38,6 +41,17 @@ def run_manager():
         print("\n[!] Shutdown signal received. Killing services...")
         for p in processes:
             p.terminate()
+        
+        # Give them 2 seconds to terminate gracefully, then kill
+        start = time.time()
+        while time.time() - start < 2:
+            if all(p.poll() is not None for p in processes):
+                break
+            time.sleep(0.1)
+            
+        for p in processes:
+            if p.poll() is None:
+                p.kill()
         sys.exit(0)
         
     signal.signal(signal.SIGINT, signal_handler)
@@ -73,14 +87,17 @@ def run_manager():
         
     print("\n[READY] All services are running. Press Ctrl+C to stop.")
     
+    # Track which services we've already reported as dead to avoid spam
+    dead_reported = [False] * len(SERVICES)
+    
     try:
         while True:
             # Check if any process died
             for i, p in enumerate(processes):
-                if p.poll() is not None:
+                if p.poll() is not None and not dead_reported[i]:
                     print(f"[!] Service {SERVICES[i]} died unexpectedly (code {p.returncode})")
-                    # Optionally restart? 
-            time.sleep(5)
+                    dead_reported[i] = True
+            time.sleep(2)
     except Exception as e:
         print(f"Manager Error: {e}")
     finally:

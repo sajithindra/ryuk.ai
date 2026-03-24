@@ -34,15 +34,18 @@ class Processor:
       4. Draws the LATEST available face results.
       5. Yields processed JPEG bytes.
     """
-    def __init__(self, client_id: str, source_url: Optional[str] = None):
+    def __init__(self, client_id: str, source_url: Optional[str] = None, substream_url: Optional[str] = None, enable_ingestion: bool = True):
         self.client_id = client_id
-        self.source_url = source_url
+        self.source_url = source_url # Primary / High-res
+        self.substream_url = substream_url # Sub-stream / Low-res
+        self.enable_ingestion = enable_ingestion
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.target_size = (640, 480)
         
         self._frame_count = 0
         self._last_faces: List[Dict] = []
+        self._plates: List[Dict] = []
         self._tracker = FaceTracker()
         
         self._is_inf_running = False
@@ -103,11 +106,14 @@ class Processor:
         latest_frame_data = {"frame": None, "lock": threading.Lock(), "running": True}
         ffmpeg_proc = None # Critical fix for cleanup NameError
 
-        if self.source_url:
+        # Prioritize sub-stream for background processing (Grid & FR)
+        capture_url = self.substream_url if self.substream_url else self.source_url
+        
+        if capture_url:
             if USE_FFMPEG_CUDA:
                 # 1. Dynamic Resolution Discovery via ffprobe
                 try:
-                    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 {shlex.quote(self.source_url)}"
+                    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 {shlex.quote(capture_url)}"
                     res_raw = subprocess.check_output(shlex.split(probe_cmd), timeout=5).decode().strip()
                     native_w, native_h = map(int, res_raw.split('x'))
                     print(f"DEBUG: Processor ({self.client_id}) — Auto-detected Stream Resolution: {native_w}x{native_h}")
@@ -115,19 +121,19 @@ class Processor:
                     print(f"DEBUG: Processor ({self.client_id}) — Resolution discovery failed: {e}. Falling back to 1080p.")
                     native_w, native_h = 1920, 1080
 
-                print(f"DEBUG: Processor ({self.client_id}) — Launching HwDecoder for RTSP: {self.source_url}")
+                print(f"DEBUG: Processor ({self.client_id}) — Launching HwDecoder for RTSP: {capture_url}")
                 from core.hw_decoder import HwDecoder
                 hw_decoder = HwDecoder(native_w, native_h, codec="h264_cuvid")
-                hw_decoder.start(source=self.source_url)
+                hw_decoder.start(source=capture_url)
                 self._ffmpeg_proc_ref = hw_decoder # Save for stop()
                 w, h = native_w, native_h
                 
             else:
-                print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream (OpenCV Backend): {self.source_url}")
+                print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream (OpenCV Backend): {capture_url}")
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|strict;experimental"
-                cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
+                cap = cv2.VideoCapture(capture_url, cv2.CAP_FFMPEG)
                 if not cap.isOpened():
-                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM: {self.source_url}")
+                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM: {capture_url}")
                     return
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -137,7 +143,7 @@ class Processor:
                         frame = hw_decoder.read_frame()
                         if frame is None:
                             print(f"DEBUG: Processor ({self.client_id}) - HwDecoder Read Break. Retrying...")
-                            hw_decoder.restart(source=self.source_url)
+                            hw_decoder.restart(source=capture_url)
                             time.sleep(1.0)
                             continue
                         
@@ -147,7 +153,7 @@ class Processor:
                     while self.running and latest_frame_data["running"]:
                         if not cap.grab():
                             time.sleep(1.0)
-                            cap.open(self.source_url, cv2.CAP_FFMPEG)
+                            cap.open(capture_url, cv2.CAP_FFMPEG)
                             continue
                         
                         with latest_frame_data["lock"]:
@@ -170,7 +176,7 @@ class Processor:
         while self.running:
             frame = None
             
-            if self.source_url:
+            if capture_url:
                 with latest_frame_data["lock"]:
                     frame = latest_frame_data["frame"]
                     latest_frame_data["frame"] = None # Consume
@@ -213,9 +219,12 @@ class Processor:
                 self._frame_count = (self._frame_count + 1) % 10_000
                 
                 # Push to Micro-Pipeline (Non-blocking)
-                # Optimization: Only push to ingestion if we are the primary source (RTSP).
+                # Optimization: Only push to ingestion if enabled and we are a pull source (RTSP).
                 # WebSocket streams are already pushed by StreamingServer (core/server.py).
-                if self.source_url and self._frame_count % INFERENCE_THROTTLE == 0:
+                if self._frame_count % 100 == 0:
+                    print(f"DEBUG: Processor ({self.client_id}) - Frame {self._frame_count} | Ingestion: {self.enable_ingestion} | URL: {capture_url}", flush=True)
+
+                if self.enable_ingestion and capture_url and self._frame_count % INFERENCE_THROTTLE == 0:
                     try:
                         packet = {
                             "client_id": self.client_id,
@@ -223,13 +232,21 @@ class Processor:
                             "timestamp": time.time(),
                             "frame": frame.copy()
                         }
-                        # We use rpush for the ingestion queue
+                        # Push to the AI pipeline
                         cache.rpush("ryuk:ingest", serde.pack(packet))
+                        
+                        # BROADCAST: Push to standard stream key for other services (ALPR, etc.)
+                        # Encode to JPEG for Redis storage efficiency
+                        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                        cache.set(f"stream:{self.client_id}:frame", buffer.tobytes(), ex=5)
+                        
                         # Limit queue size to prevent blowup if services are down
                         if cache.llen("ryuk:ingest") > 100:
                             cache.lpop("ryuk:ingest")
                     except Exception as e:
                         print(f"DEBUG: Processor ({self.client_id}) — Failed to push to pipeline: {e}")
+
+
                 
                 with self._inf_lock:
                     self._tracker.predict()
@@ -241,6 +258,7 @@ class Processor:
                 should_sync_ui = (now - self._last_ui_update > 1.0)
                 
                 with self._inf_lock:
+                    plates_to_draw = self._plates.copy()
                     for tid, track in list(self._tracker._tracks.items()):
                         # Skip if stale even if not yet pruned by background thread
                         if track.is_stale:
@@ -269,7 +287,7 @@ class Processor:
                             if hasattr(l, 'on_detection'):
                                 l.on_detection({'client_id': self.client_id, 'detections': detections_to_sync})
 
-                self._draw_frame(frame, faces_to_draw)
+                self._draw_frame(frame, faces_to_draw, plates_to_draw)
                 encoded = self._encode_frame(frame)
                 if encoded:
                     self.latest_processed_frame = encoded
@@ -297,69 +315,43 @@ class Processor:
             ffmpeg_proc.wait(timeout=1.0)
 
     def _pipeline_result_worker(self):
-        """Polls Redis for latest pipeline results and updates tracker."""
+        """Polls Redis for latest pipeline results (Face & ALPR) and updates tracker."""
         res_key = f"stream:{self.client_id}:results"
-        print(f"DEBUG: Processor ({self.client_id}) — Result worker started on {res_key}")
+        alpr_key = f"stream:{self.client_id}:alpr_results"
+        print(f"DEBUG: Processor ({self.client_id}) — Result worker started")
         
         while True:
             try:
-                # We poll the results key. 
-                # Alternative: Use Redis Pub/Sub for lower latency notifications
-                raw_res = cache.blpop(res_key, timeout=1)
+                # 1. Face Results
+                raw_res = cache.lpop(res_key)
                 if raw_res:
-                    _, data = raw_res
-                    packet = serde.unpack(data)
-                    if not packet:
-                        continue
+                    packet = serde.unpack(raw_res)
+                    if packet:
+                        faces = packet.get('faces', [])
+                        recognition = packet.get('recognition', [])
+                        for i, face in enumerate(faces):
+                            if i < len(recognition):
+                                if isinstance(face, dict): face['ident_meta'] = recognition[i]
+                                else: face.ident_meta = recognition[i]
                         
-                    faces = packet.get('faces', [])
-                    recognition = packet.get('recognition', [])
-                    
-                    if packet.get('frame_count', 0) % 20 == 0:
-                         print(f"DEBUG: Processor ({self.client_id}) — Received Result Packet (Faces: {len(faces)})")
-                    
-                    # We need to map recognition (identities) back to face objects
-                    # so tracker can see them.
-                    for i, face in enumerate(faces):
-                        if i < len(recognition):
-                            if isinstance(face, dict):
-                                face['ident_meta'] = recognition[i]
-                            else:
-                                face.ident_meta = recognition[i]
+                        with self._inf_lock:
+                            tracked = self._tracker.update(faces, inf_scale=1.0)
+                            for item in tracked:
+                                track = item["track"]
+                                meta = item["raw_face"].get("ident_meta") if isinstance(item["raw_face"], dict) else getattr(item["raw_face"], "ident_meta", None)
+                                if meta and meta.get("name") and meta.get("name") != "Unknown":
+                                    track.pinned_identity = meta
+                                track.id_cache = meta
 
+                # 2. ALPR Results
+                import json
+                raw_alpr = cache.lpop(alpr_key)
+                if raw_alpr:
+                    alpr_packet = json.loads(raw_alpr)
+                    plates = alpr_packet.get('plates', [])
                     with self._inf_lock:
-                        # Trackers update() logic expects raw_faces (list of insightface.Face)
-                        # and scale (inf_frame to original frame).
-                        # In our packet, bboxes are already scaled to original? 
-                        # No, let's check detector.py.
-                        # detector.py takes frame as is. If Processor sends scaled frame, it's scaled.
-                        # Processor sends 'frame.copy()' from main loop.
-                        # Main loop 'frame' is native resolution (e.g. 1080p).
-                        # So scale in tracker.update should be 1.0.
-                        tracked = self._tracker.update(faces, inf_scale=1.0)
-                        
-                        # Apply identity logic similar to _run_inference but decoupled
-                        for item in tracked:
-                            track = item["track"]
-                            raw_face = item["raw_face"] 
-                            
-                            # Support both dict access (from msgpack) and attribute access (Face object)
-                            if isinstance(raw_face, dict):
-                                meta = raw_face.get("ident_meta")
-                            else:
-                                meta = getattr(raw_face, "ident_meta", None)
-                                
-                            # PIN IDENTITY: Only if we found a valid person (with a name)
-                            if meta and meta.get("name") and meta.get("name") != "Unknown":
-                                track.pinned_identity = meta
-                            track.id_cache = meta
+                        self._plates = plates
 
-                            # Signal UI listeners
-                            if meta and "aadhar" in meta:
-                                for l in list(self.listeners):
-                                    if hasattr(l, 'on_detection'):
-                                        l.on_detection({'client_id': self.client_id, 'detections': [meta]})
-                
                 # Sleep to prevent tight loop
                 time.sleep(0.05)
                 
@@ -381,7 +373,7 @@ class Processor:
 
         return "Unknown", "Low", None
 
-    def _draw_frame(self, frame: np.ndarray, faces: List[Dict]):
+    def _draw_frame(self, frame: np.ndarray, faces: List[Dict], plates: List[Dict] = None):
         from config import VIDEO_DRAW_THICKNESS_SCALE, VIDEO_FONT_SCALE_BASE
         h, w = frame.shape[:2]
         # Responsive thickness: on 4k (3840w), thinner than 2 would be invisible.
@@ -392,6 +384,7 @@ class Processor:
         font_scale = max(0.4, font_scale)
         text_thickness = max(1, int(base_thickness / 2))
 
+        # 1. Draw Faces (Blue/Red/Green)
         for pf in faces:
             bbox = pf["bbox"]
             name = pf["name"]
@@ -430,6 +423,22 @@ class Processor:
             cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), (10, 8, 5), -1)
             cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), main_color, 1, cv2.LINE_4)
             cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, text_thickness, cv2.LINE_4)
+
+        # 2. Draw Plates (Blue)
+        if plates:
+            plate_color = (255, 191, 0) # Deep Blue / Azure
+            for p in plates:
+                bbox = np.array(p["bbox"]).astype(int)
+                txt = p.get("plate")
+                
+                # Draw box
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), plate_color, base_thickness, cv2.LINE_4)
+                
+                if txt:
+                    label = f" {txt.upper()} "
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_DUPLEX, font_scale * 0.8, text_thickness)
+                    cv2.rectangle(frame, (bbox[0], bbox[3]), (bbox[0] + tw, bbox[3] + th + 10), (10, 8, 5), -1)
+                    cv2.putText(frame, label, (bbox[0], bbox[3] + th + 5), cv2.FONT_HERSHEY_DUPLEX, font_scale * 0.8, (255, 255, 255), text_thickness, cv2.LINE_4)
 
     def _encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
         from config import VIDEO_JPEG_QUALITY

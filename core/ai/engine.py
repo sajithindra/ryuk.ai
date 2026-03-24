@@ -13,7 +13,9 @@ from insightface.app import FaceAnalysis
 from insightface.app.common import Face
 from core.logger import logger
 from core.ai.utils import IOBindingWrapper, TorchFaceAligner, TorchPreprocessor
-from config import AI_BATCH_SIZE, AI_BATCH_TIMEOUT_MS
+from core.ai.alpr.detector import PlateDetector
+from config import AI_BATCH_SIZE, AI_BATCH_TIMEOUT_MS, ALPR_CONFIG_PATH
+import yaml
 
 class GlobalAIProcessor:
     def __init__(self, det_size=(640, 640), use_worker=True):
@@ -28,6 +30,19 @@ class GlobalAIProcessor:
 
         self._inf_lock = threading.Lock()
         self._setup_io_binding()
+        
+        # Initialize ALPR Detector (YOLOv8)
+        try:
+            with open(ALPR_CONFIG_PATH, 'r') as f:
+                alpr_config = yaml.safe_load(f)
+            self.alpr_detector = PlateDetector(
+                model_path=alpr_config['alpr']['detection']['model_path'],
+                conf_threshold=alpr_config['alpr']['detection']['conf_threshold'],
+                device='cuda'
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize ALPR Detector in engine: {e}")
+            self.alpr_detector = None
 
         self.input_queue = queue.Queue(maxsize=32)
         self.aligner = TorchFaceAligner(device='cuda')
@@ -73,18 +88,18 @@ class GlobalAIProcessor:
 
     def get(self, frame):
         res_event = threading.Event()
-        result = {"faces": [], "event": res_event}
+        result = {"faces": [], "plates": [], "event": res_event}
         try:
             # Aggressive frame dropping if backlog exists
             if self.input_queue.qsize() > 5:
-                return {"faces": []}
-            self.input_queue.put((frame, result), timeout=0.5) # Reduced timeout
+                return {"faces": [], "plates": []}
+            self.input_queue.put((frame, result), timeout=0.5)
         except queue.Full:
-            return {"faces": []}
+            return {"faces": [], "plates": []}
             
         if not res_event.wait(timeout=3.0):
-            return {"faces": []}
-        return {"faces": result["faces"]}
+            return {"faces": [], "plates": []}
+        return {"faces": result["faces"], "plates": result["plates"]}
 
     def _batch_worker(self):
         while True:
@@ -114,32 +129,33 @@ class GlobalAIProcessor:
         if not valid_frames:
             for _, res in batch:
                 res["faces"] = []
+                res["plates"] = []
                 res["event"].set()
             return
 
         det_model = self.app.models.get('detection')
         all_faces = [] # Parallel to valid_frames
         
-        for frame in valid_frames:
-            # Use det_model directly for finer control, max_num=100 to ensure we don't accidentally limit to 0
-            bboxes, kpss = det_model.detect(frame, max_num=100)
-            faces = [Face(bbox=bboxes[j, 0:4], kps=kpss[j], det_score=bboxes[j, 4]) 
-                    for j in range(len(bboxes))] if bboxes is not None else []
-            all_faces.append(faces)
+        with self._inf_lock:
+            for frame in valid_frames:
+                # Use det_model directly for finer control, max_num=100
+                bboxes, kpss = det_model.detect(frame, max_num=100)
+                faces = [Face(bbox=bboxes[j, 0:4], kps=kpss[j], det_score=bboxes[j, 4]) 
+                        for j in range(len(bboxes))] if bboxes is not None else []
+                all_faces.append(faces)
 
-        # 2. Attributes & Recognition (only for valid frames with faces)
-        rec_model = self.app.models.get('recognition')
-        if rec_model and any(all_faces):
-            all_chips = []
-            chip_map = [] # list of (all_faces_idx, face_idx)
-            
-            with torch.no_grad():
+            # 2. Attributes & Recognition (only for valid frames with faces)
+            rec_model = self.app.models.get('recognition')
+            if rec_model and any(all_faces):
+                all_chips = []
+                chip_map = [] # list of (all_faces_idx, face_idx)
+                
                 for i, frame in enumerate(valid_frames):
                     faces = all_faces[i]
                     if not faces: continue
                     
                     # Batched alignment for this frame's faces
-                    frame_gpu = torch.from_numpy(np.ascontiguousarray(frame)).to('cuda', non_blocking=True).permute(2, 0, 1).float().unsqueeze(0)
+                    frame_gpu = torch.from_numpy(np.ascontiguousarray(frame).copy()).to('cuda', non_blocking=True).permute(2, 0, 1).float().unsqueeze(0)
                     lms_gpu = torch.from_numpy(np.array([f.kps for f in faces])).to('cuda', non_blocking=True).float()
                     chips = self.aligner.align_batched(frame_gpu, lms_gpu, torch.zeros(len(faces), dtype=torch.long, device='cuda'))
                     chips_np = chips.permute(0, 2, 3, 1).byte().cpu().numpy()
@@ -147,27 +163,39 @@ class GlobalAIProcessor:
                     for j, chip in enumerate(chips_np):
                         all_chips.append(chip)
                         chip_map.append((i, j))
-            
-            if all_chips:
-                feats = rec_model.get_feat(all_chips)
-                norms = np.linalg.norm(feats, axis=1, keepdims=True)
-                norms = np.where(norms == 0, 1.0, norms)
-                feats = (feats / norms).astype(np.float32)
                 
-                for i, (f_idx, face_idx) in enumerate(chip_map):
-                    all_faces[f_idx][face_idx].embedding = feats[i]
-                    # Ensure scalar conversion is safe
-                    n_val = norms[i, 0]
-                    if hasattr(n_val, 'item'):
-                        n_val = n_val.item()
-                    all_faces[f_idx][face_idx].norm = float(n_val)
+                if all_chips:
+                    feats = rec_model.get_feat(all_chips)
+                    norms = np.linalg.norm(feats, axis=1, keepdims=True)
+                    norms = np.where(norms == 0, 1.0, norms)
+                    feats = (feats / norms).astype(np.float32)
+                    
+                    for i, (f_idx, face_idx) in enumerate(chip_map):
+                        all_faces[f_idx][face_idx].embedding = feats[i]
+                        n_val = norms[i, 0]
+                        if hasattr(n_val, 'item'): n_val = n_val.item()
+                        all_faces[f_idx][face_idx].norm = float(n_val)
 
-        # 3. Map results back to original batch items
+            # 3. ALPR Detection (YOLOv8)
+            all_plates = [[] for _ in range(len(valid_frames))]
+            if self.alpr_detector:
+                try:
+                    # YOLOv8 handles batch inference efficiently
+                    yolo_results = self.alpr_detector.detect_batch(valid_frames)
+                    print(f"DEBUG: GlobalAIProcessor received {sum(len(d) for d in yolo_results)} plate detections for {len(valid_frames)} frames", flush=True)
+                    for i, detections in enumerate(yolo_results):
+                        all_plates[i] = detections
+                except Exception as e:
+                    logger.error(f"YOLO Batch Inference Error: {e}")
+
+        # 4. Map results back to original batch items
         valid_frame_ptr = 0
         for i, (frame, res) in enumerate(batch):
             if i in valid_indices:
                 res["faces"] = all_faces[valid_frame_ptr]
+                res["plates"] = all_plates[valid_frame_ptr]
                 valid_frame_ptr += 1
             else:
                 res["faces"] = []
+                res["plates"] = []
             res["event"].set()

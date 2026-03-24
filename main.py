@@ -100,9 +100,18 @@ if __name__ == "__main__":
         
         manager_proc.terminate()
         try:
-            manager_proc.wait(timeout=5)
+            # Wait up to 3 seconds for clean exit
+            manager_proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
+            # If still alive, kill it and all its children (which manager.py should also do)
+            print("* Service Manager hanging, forcing kill...")
             manager_proc.kill()
+        
+        # Final safety: cleanup any remaining orphans by process name
+        # This covers cases where the manager itself was killed or failed.
+        # os.system("pkill -f unified_engine.py > /dev/null 2>&1")
+        # os.system("pkill -f alpr_service.py > /dev/null 2>&1")
+        # os.system("pkill -f sink.py > /dev/null 2>&1")
         
         print("* Ryuk AI — Shutdown Complete.")
         # Hard-exit: skips pymongo/uvloop atexit cleanup races that produce

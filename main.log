@@ -3863,3 +3863,602 @@ NiceGUI ready to go on http://localhost:8000, http://192.168.1.33:8000, and http
 2026-03-24 13:37:46,745 - ryuk - INFO - [indexer.py:286] - MongoDB: Camera WORK → ['Manual'] (Source: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1)
 2026-03-24 13:37:46,751 - ryuk - INFO - [nice_gui.py:749] - UI: Manually linked camera WORK -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
 2026-03-24 13:37:51,253 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 14:23:24,045 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 14:23:24,932 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 14:23:27,226 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 14:23:30,123 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 14:23:30,351 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 14:23:37,665 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for WORK -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-24 14:23:42,559 - ryuk - INFO - [indexer.py:279] - MongoDB: Deleted Camera WORK
+2026-03-24 14:24:00,924 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.18.0/24) for ports 554,8554,10554,6554...
+2026-03-24 14:24:02,990 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.18.0/24) for ports 554,8554,10554,6554...
+2026-03-24 14:24:08,708 - ryuk - INFO - [discovery.py:81] - Discovery: Found 0 potential RTSP devices across all interfaces.
+2026-03-24 14:24:10,939 - ryuk - INFO - [discovery.py:81] - Discovery: Found 0 potential RTSP devices across all interfaces.
+2026-03-24 14:28:58,217 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.18.0/24) for ports 554,8554,10554,6554...
+2026-03-24 14:29:04,025 - ryuk - INFO - [discovery.py:81] - Discovery: Found 0 potential RTSP devices across all interfaces.
+2026-03-24 14:29:58,217 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.18.0/24) for ports 554,8554,10554,6554...
+2026-03-24 14:30:03,501 - ryuk - INFO - [discovery.py:81] - Discovery: Found 1 potential RTSP devices across all interfaces.
+2026-03-24 14:30:18,549 - ryuk - INFO - [indexer.py:286] - MongoDB: Camera OFFICE → ['Manual'] (Source: rtsp://admin:L2577636@192.168.18.128:554/cam/realmonitor?channel=1&subtype=1)
+2026-03-24 14:30:18,555 - ryuk - INFO - [nice_gui.py:749] - UI: Manually linked camera OFFICE -> rtsp://admin:L2577636@192.168.18.128:554/cam/realmonitor?channel=1&subtype=1
+2026-03-24 14:30:56,664 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 14:33:44,173 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 14:53:47,842 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.18.0/24) for ports 554,8554,10554,6554...
+2026-03-24 14:53:51,699 - ryuk - INFO - [discovery.py:81] - Discovery: Found 1 potential RTSP devices across all interfaces.
+2026-03-24 17:14:30,080 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:14:31,176 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 17:14:33,501 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:14:36,317 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 17:14:36,581 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:15:34,384 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:15:35,139 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 17:15:37,442 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:15:38,962 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 17:15:39,178 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:20:49,611 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:20:50,483 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 17:20:52,798 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:20:54,618 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 17:20:54,772 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:21:05,326 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:21:05,344 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:21:06,636 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:24:07,908 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:24:08,790 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 17:28:21,905 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:28:23,960 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 17:28:24,117 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:28:27,124 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:28:27,141 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:28:27,289 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:32:26,373 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:32:26,403 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:32:26,563 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:33:26,137 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:33:26,140 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:33:26,308 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:34:03,267 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:34:03,269 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:34:03,429 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:38:27,091 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:38:27,095 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:38:27,260 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:38:37,671 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 17:38:37,672 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:38:37,673 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 17:38:37,700 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 17:38:37,700 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 17:38:37,700 - ryuk - INFO - [alpr_service.py:65] - ALPR Service Startup Complete
+2026-03-24 17:39:30,858 - ryuk - INFO - [pipeline.py:59] - ALPR Pipeline stopped
+2026-03-24 17:39:30,859 - ryuk - INFO - [alpr_service.py:74] - ALPR Service Shutdown Complete
+2026-03-24 17:39:41,829 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:39:42,449 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 17:39:42,582 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:39:47,042 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:39:47,044 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:39:47,190 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:39:48,663 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 17:39:48,664 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:39:48,664 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 17:39:48,669 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 17:39:48,669 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 17:39:48,669 - ryuk - INFO - [alpr_service.py:65] - ALPR Service Startup Complete
+2026-03-24 17:39:53,386 - ryuk - INFO - [pipeline.py:59] - ALPR Pipeline stopped
+2026-03-24 17:39:53,386 - ryuk - INFO - [alpr_service.py:74] - ALPR Service Shutdown Complete
+2026-03-24 17:40:50,981 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:40:52,066 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 17:40:54,356 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:40:56,099 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 17:40:56,237 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 17:40:59,369 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:40:59,371 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 17:40:59,518 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 17:41:00,966 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 17:41:00,967 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 17:41:00,967 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 17:41:00,971 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 17:41:00,971 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 17:41:00,971 - ryuk - INFO - [alpr_service.py:65] - ALPR Service Startup Complete
+2026-03-24 17:41:22,308 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for OFFICE -> rtsp://admin:L2577636@192.168.18.128:554/cam/realmonitor?channel=1&subtype=1
+2026-03-24 17:41:26,698 - ryuk - INFO - [indexer.py:279] - MongoDB: Deleted Camera OFFICE
+2026-03-24 17:41:27,845 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.1.0/24) for ports 554,8554,10554,6554...
+2026-03-24 17:41:29,403 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.1.0/24) for ports 554,8554,10554,6554...
+2026-03-24 17:41:30,610 - ryuk - INFO - [discovery.py:81] - Discovery: Found 1 potential RTSP devices across all interfaces.
+2026-03-24 17:41:43,380 - ryuk - INFO - [discovery.py:81] - Discovery: Found 1 potential RTSP devices across all interfaces.
+2026-03-24 17:42:15,516 - ryuk - INFO - [indexer.py:286] - MongoDB: Camera FRONT_DIIR → ['Manual'] (Source: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1)
+2026-03-24 17:42:15,523 - ryuk - INFO - [nice_gui.py:749] - UI: Manually linked camera FRONT_DIIR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-24 17:42:27,350 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:44:48,493 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:46:48,547 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:48:49,243 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:50:51,744 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:52:51,792 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:54:51,810 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:56:51,864 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 17:57:43,116 - ryuk - INFO - [pipeline.py:59] - ALPR Pipeline stopped
+2026-03-24 17:57:43,117 - ryuk - INFO - [alpr_service.py:74] - ALPR Service Shutdown Complete
+2026-03-24 18:00:06,145 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:00:07,089 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:00:09,469 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:00:11,200 - ryuk - INFO - [nice_gui.py:465] - UI: Initialized session for FRONT_DIIR (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:00:11,580 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:00:11,755 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:00:14,769 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 18:00:15,466 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:00:15,468 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:00:15,666 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:00:17,531 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:00:17,532 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:00:17,533 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:00:17,537 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:00:17,537 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:00:17,537 - ryuk - INFO - [alpr_service.py:69] - ALPR Service Startup Complete
+2026-03-24 18:06:47,729 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:06:47,729 - ryuk - INFO - [alpr_service.py:43] - ALPR Service: Monitoring camera FRONT_DIIR (Source: Main)
+2026-03-24 18:10:33,115 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:10:34,150 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:10:36,181 - ryuk - INFO - [nice_gui.py:465] - UI: Initialized session for FRONT_DIIR (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:10:36,536 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:10:38,127 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:10:38,322 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:10:43,451 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:10:43,453 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:10:43,677 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:10:45,656 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:10:45,658 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:10:45,658 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:10:45,663 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:10:45,663 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:10:45,663 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:10:45,665 - ryuk - INFO - [pipeline.py:59] - ALPR Pipeline stopped
+2026-03-24 18:10:45,665 - ryuk - INFO - [alpr_service.py:75] - ALPR Service Shutdown Complete
+2026-03-24 18:12:00,721 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:12:01,794 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:12:04,159 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:12:05,067 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:12:05,148 - ryuk - INFO - [nice_gui.py:465] - UI: Initialized session for FRONT_DIIR (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:12:05,253 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:12:10,289 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:12:10,291 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:12:10,492 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:12:12,460 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:12:12,461 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:12:12,462 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:12:12,465 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:12:12,466 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:12:12,466 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:12:12,482 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:12:12,482 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:13:36,152 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:13:40,175 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:13:40,344 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:14:15,355 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:14:19,464 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:14:19,638 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:18:32,160 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:18:36,225 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:18:36,382 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:19:59,639 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:19:59,642 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:19:59,861 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:20:01,702 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:20:01,703 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:20:01,703 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:20:01,708 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:20:01,709 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:20:01,709 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:20:01,712 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:20:01,712 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:21:27,595 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:21:27,597 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:21:27,801 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:21:29,592 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:21:29,593 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:21:29,593 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:21:29,597 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:21:29,598 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:21:29,598 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:21:29,601 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:21:29,601 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:22:59,039 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:22:59,955 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:23:02,162 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:23:02,331 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:23:02,774 - ryuk - INFO - [nice_gui.py:465] - UI: Initialized session for FRONT_DIIR (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:23:03,057 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:23:03,243 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:23:06,053 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:23:06,247 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:23:08,202 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:23:08,204 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:23:08,384 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:23:10,197 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:23:10,198 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:23:10,198 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:23:10,202 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:23:10,202 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:23:10,202 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:23:10,218 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:23:10,218 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+nohup: ignoring input
+INFO:     Started server process [24743]
+INFO:     Waiting for application startup.
+2026-03-24 18:24:36,523 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:24:36,523 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:24:36,523] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:24:36,525 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:24:36,525 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+[2026-03-24 18:24:36,525] [ WARNING] detector.py:14 - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:24:36,703 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:24:36,703 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+[2026-03-24 18:24:36,703] [    INFO] detector.py:20 - ALPR Detector initialized on cuda
+2026-03-24 18:24:38,468 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:24:38,468 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+[2026-03-24 18:24:38,468] [    INFO] ocr.py:17 - PaddleOCR initialized (GPU: True)
+2026-03-24 18:24:38,468 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:24:38,468 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:24:38,468] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:24:38,469 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:24:38,469 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+[2026-03-24 18:24:38,469] [    INFO] cache.py:9 - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:24:38,472 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:24:38,472 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+[2026-03-24 18:24:38,472] [    INFO] storage.py:21 - ALPR MongoDB indexes created
+2026-03-24 18:24:38,473 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+2026-03-24 18:24:38,473 - ryuk - INFO - [pipeline.py:44] - ALPR Pipeline started
+[2026-03-24 18:24:38,473] [    INFO] pipeline.py:44 - ALPR Pipeline started
+2026-03-24 18:24:38,473 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:24:38,473 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+[2026-03-24 18:24:38,473] [    INFO] alpr_service.py:66 - ALPR Service Startup Complete
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+2026-03-24 18:24:38,476 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:24:38,476 - ryuk - INFO - [pipeline.py:53] - Camera FRONT_DIIR added to ALPR pipeline
+[2026-03-24 18:24:38,476] [    INFO] pipeline.py:53 - Camera FRONT_DIIR added to ALPR pipeline
+2026-03-24 18:24:38,476 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:24:38,476 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+[2026-03-24 18:24:38,476] [    INFO] alpr_service.py:39 - ALPR Service: Monitoring camera FRONT_DIIR
+nohup: ignoring input
+INFO:     Started server process [25403]
+INFO:     Waiting for application startup.
+2026-03-24 18:27:45,079 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:27:45,079 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:27:45,079] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:27:45,081 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:27:45,081 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+[2026-03-24 18:27:45,081] [ WARNING] detector.py:14 - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:27:45,267 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:27:45,267 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+[2026-03-24 18:27:45,267] [    INFO] detector.py:20 - ALPR Detector initialized on cuda
+2026-03-24 18:27:47,102 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:27:47,102 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+[2026-03-24 18:27:47,102] [    INFO] ocr.py:17 - PaddleOCR initialized (GPU: True)
+2026-03-24 18:27:47,103 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:27:47,103 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:27:47,103] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:27:47,104 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:27:47,104 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+[2026-03-24 18:27:47,104] [    INFO] cache.py:9 - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:27:47,108 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:27:47,108 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+[2026-03-24 18:27:47,108] [    INFO] storage.py:21 - ALPR MongoDB indexes created
+2026-03-24 18:27:47,108 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+2026-03-24 18:27:47,108 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+[2026-03-24 18:27:47,108] [    INFO] pipeline.py:45 - ALPR Pipeline started
+2026-03-24 18:27:47,108 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:27:47,108 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+[2026-03-24 18:27:47,108] [    INFO] alpr_service.py:66 - ALPR Service Startup Complete
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+2026-03-24 18:27:47,112 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:27:47,112 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+[2026-03-24 18:27:47,112] [    INFO] pipeline.py:62 - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:27:47,112 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:27:47,112 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+[2026-03-24 18:27:47,112] [    INFO] alpr_service.py:39 - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:27:47,819 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.86
+2026-03-24 18:27:47,819 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.86
+[2026-03-24 18:27:47,819] [    INFO] detector.py:46 - ALPR Detect: Class 3 Conf 0.86
+nohup: ignoring input
+INFO:     Started server process [25969]
+INFO:     Waiting for application startup.
+2026-03-24 18:28:59,872 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:28:59,872 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:28:59,872] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:28:59,874 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:28:59,874 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+[2026-03-24 18:28:59,874] [ WARNING] detector.py:14 - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:29:00,070 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:29:00,070 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+[2026-03-24 18:29:00,070] [    INFO] detector.py:20 - ALPR Detector initialized on cuda
+2026-03-24 18:29:01,876 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:29:01,876 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+[2026-03-24 18:29:01,876] [    INFO] ocr.py:17 - PaddleOCR initialized (GPU: True)
+2026-03-24 18:29:01,877 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:29:01,877 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:29:01,877] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:29:01,877 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:29:01,877 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+[2026-03-24 18:29:01,877] [    INFO] cache.py:9 - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:29:01,881 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:29:01,881 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+[2026-03-24 18:29:01,881] [    INFO] storage.py:21 - ALPR MongoDB indexes created
+2026-03-24 18:29:01,881 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+2026-03-24 18:29:01,881 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+[2026-03-24 18:29:01,881] [    INFO] pipeline.py:45 - ALPR Pipeline started
+2026-03-24 18:29:01,881 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:29:01,881 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+[2026-03-24 18:29:01,881] [    INFO] alpr_service.py:66 - ALPR Service Startup Complete
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+2026-03-24 18:29:01,885 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:29:01,885 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+[2026-03-24 18:29:01,885] [    INFO] pipeline.py:62 - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:29:01,885 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:29:01,885 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+[2026-03-24 18:29:01,885] [    INFO] alpr_service.py:39 - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:29:02,347 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.85
+2026-03-24 18:29:02,347 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.85
+[2026-03-24 18:29:02,347] [    INFO] detector.py:46 - ALPR Detect: Class 3 Conf 0.85
+nohup: ignoring input
+INFO:     Started server process [26403]
+INFO:     Waiting for application startup.
+2026-03-24 18:30:07,759 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:30:07,759 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:30:07,759] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:30:07,761 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:30:07,761 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+[2026-03-24 18:30:07,761] [ WARNING] detector.py:14 - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:30:07,941 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:30:07,941 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+[2026-03-24 18:30:07,941] [    INFO] detector.py:20 - ALPR Detector initialized on cuda
+2026-03-24 18:30:09,724 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:30:09,724 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+[2026-03-24 18:30:09,724] [    INFO] ocr.py:17 - PaddleOCR initialized (GPU: True)
+2026-03-24 18:30:09,725 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:30:09,725 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+[2026-03-24 18:30:09,725] [    INFO] storage.py:15 - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:30:09,725 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:30:09,725 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+[2026-03-24 18:30:09,725] [    INFO] cache.py:9 - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:30:09,730 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:30:09,730 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+[2026-03-24 18:30:09,730] [    INFO] storage.py:21 - ALPR MongoDB indexes created
+2026-03-24 18:30:09,730 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+2026-03-24 18:30:09,730 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+[2026-03-24 18:30:09,730] [    INFO] pipeline.py:45 - ALPR Pipeline started
+2026-03-24 18:30:09,730 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:30:09,730 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+[2026-03-24 18:30:09,730] [    INFO] alpr_service.py:66 - ALPR Service Startup Complete
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+2026-03-24 18:30:09,733 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:30:09,733 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+[2026-03-24 18:30:09,733] [    INFO] pipeline.py:62 - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:30:09,733 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:30:09,733 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+[2026-03-24 18:30:09,733] [    INFO] alpr_service.py:39 - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:30:10,195 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.89
+2026-03-24 18:30:10,195 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.89
+[2026-03-24 18:30:10,195] [    INFO] detector.py:46 - ALPR Detect: Class 3 Conf 0.89
+2026-03-24 18:32:42,636 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:32:46,395 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:32:46,550 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:33:52,139 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:33:53,043 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:33:55,383 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:33:55,715 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:33:55,859 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:34:00,758 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:34:00,760 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:34:00,918 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:34:02,531 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:34:02,532 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:34:02,532 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:34:02,536 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:34:02,536 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+2026-03-24 18:34:02,536 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:34:02,538 - ryuk - INFO - [pipeline.py:70] - ALPR Pipeline stopped
+2026-03-24 18:34:02,538 - ryuk - INFO - [alpr_service.py:75] - ALPR Service Shutdown Complete
+2026-03-24 18:34:38,613 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:34:38,763 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:36:36,829 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:36:37,609 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:36:39,936 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:36:41,750 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:36:41,917 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:36:45,238 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:36:45,240 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:36:45,393 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:36:46,901 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:36:46,902 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:36:46,902 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:36:46,906 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:36:46,906 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+2026-03-24 18:36:46,906 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:36:46,920 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:36:46,920 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:37:53,839 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:37:54,694 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:37:57,008 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:37:57,453 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:37:57,589 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:38:01,973 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:38:01,975 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:38:02,120 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:38:03,605 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:38:03,606 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:38:03,606 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:38:03,610 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:38:03,611 - ryuk - INFO - [pipeline.py:45] - ALPR Pipeline started
+2026-03-24 18:38:03,611 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:38:03,623 - ryuk - INFO - [pipeline.py:62] - Camera FRONT_DIIR worker started in ALPR pipeline
+2026-03-24 18:38:03,623 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_DIIR
+2026-03-24 18:38:12,392 - ryuk - INFO - [nice_gui.py:465] - UI: Initialized session for FRONT_DIIR (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:38:16,204 - ryuk - INFO - [detector.py:46] - ALPR Detect: Class 3 Conf 0.84
+2026-03-24 18:40:41,485 - ryuk - INFO - [indexer.py:279] - MongoDB: Deleted Camera FRONT_DIIR
+2026-03-24 18:45:21,801 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:45:22,812 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:45:25,179 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:45:26,006 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:45:26,182 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:45:30,981 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:45:30,983 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:45:31,147 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:45:32,862 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:45:32,862 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:45:32,863 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:45:32,867 - ryuk - INFO - [storage.py:21] - ALPR MongoDB indexes created
+2026-03-24 18:45:32,868 - ryuk - INFO - [pipeline.py:46] - ALPR Pipeline started
+2026-03-24 18:45:32,868 - ryuk - INFO - [alpr_service.py:66] - ALPR Service Startup Complete
+2026-03-24 18:46:30,757 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.1.0/24) for ports 554,8554,10554,6554...
+2026-03-24 18:46:33,553 - ryuk - INFO - [discovery.py:81] - Discovery: Found 1 potential RTSP devices across all interfaces.
+2026-03-24 18:46:59,924 - ryuk - INFO - [indexer.py:287] - MongoDB: Camera FRONT_HOME → ['Manual'] (Source: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:46:59,930 - ryuk - INFO - [nice_gui.py:779] - UI: Manually linked camera FRONT_HOME -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-24 18:47:02,882 - ryuk - INFO - [pipeline.py:63] - Camera FRONT_HOME worker started in ALPR pipeline
+2026-03-24 18:47:02,882 - ryuk - INFO - [alpr_service.py:39] - ALPR Service: Monitoring camera FRONT_HOME
+2026-03-24 18:53:25,012 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:53:26,065 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 18:53:28,530 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:53:29,260 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 18:53:30,393 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:53:30,395 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:53:30,449 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:53:30,795 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:53:34,170 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:53:34,171 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:53:34,171 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:53:34,416 - ryuk - ERROR - [engine.py:191] - YOLO Batch Inference Error: 'Conv' object has no attribute 'bn'
+2026-03-24 18:56:48,043 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:56:48,045 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:56:48,111 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:56:48,441 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:56:52,051 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:56:52,052 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:56:52,053 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 18:56:52,761 - ryuk - ERROR - [engine.py:191] - YOLO Batch Inference Error: 'Conv' object has no attribute 'bn'
+2026-03-24 18:59:49,823 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 18:59:49,826 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 18:59:49,877 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 18:59:50,164 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 18:59:53,181 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 18:59:53,182 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 18:59:53,182 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 19:00:32,337 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:00:33,316 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 19:00:35,309 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 19:00:35,679 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:00:37,505 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 19:00:37,507 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 19:00:37,561 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 19:00:37,884 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:00:41,339 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 19:00:41,340 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 19:00:41,340 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 19:01:49,257 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:01:50,155 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 19:01:52,341 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 19:01:52,521 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:01:53,908 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 19:01:53,909 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 19:01:53,959 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 19:01:54,246 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:01:57,403 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 19:01:57,404 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 19:01:57,404 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 19:03:52,870 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:03:53,733 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 19:03:55,205 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 19:03:56,095 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:03:57,530 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 19:03:57,532 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 19:03:57,584 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 19:03:57,868 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:04:01,119 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 19:04:01,120 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 19:04:01,120 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 19:04:49,365 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-24 19:08:43,425 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:08:44,445 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 19:08:46,833 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:08:50,120 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 19:08:50,123 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 19:08:50,181 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 19:08:50,496 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:08:50,898 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 19:08:53,724 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 19:08:53,725 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 19:08:53,725 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 19:40:58,262 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:40:59,056 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 19:41:01,359 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:41:02,366 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 19:41:02,368 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 19:41:02,421 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 19:41:02,671 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 15 vectors for 3 identities.
+2026-03-24 19:41:05,295 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 19:41:05,295 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 19:41:05,296 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 19:41:14,438 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 19:41:30,106 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 5 vectors for 2 identities.
+2026-03-24 19:41:32,806 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-24 19:44:29,330 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 19:44:31,156 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 19:44:33,135 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 19:44:33,137 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 19:44:33,191 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 19:44:36,669 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 19:44:36,670 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 19:44:36,670 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:08:49,459 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:08:52,573 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 23:08:54,559 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:08:54,561 - ryuk - WARNING - [detector.py:14] - Detection model not found at data/models/alpr/license_plate_detector.pt. Using default yolov8n.pt
+2026-03-24 23:08:54,630 - ryuk - INFO - [detector.py:20] - ALPR Detector initialized on cuda
+2026-03-24 23:08:58,422 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 23:08:58,423 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 23:08:58,423 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:14:49,641 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:14:52,225 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 23:14:53,091 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:14:53,144 - ryuk - INFO - [detector.py:25] - ALPR Detector initialized on cuda (Fallback: False)
+2026-03-24 23:14:56,596 - ryuk - INFO - [ocr.py:17] - PaddleOCR initialized (GPU: True)
+2026-03-24 23:14:56,597 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 23:14:56,598 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:22:55,643 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:22:58,674 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:22:58,980 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 23:23:57,755 - ryuk - INFO - [detector.py:22] - FastALPR initialized on cuda
+2026-03-24 23:25:48,579 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:25:50,152 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 23:25:51,691 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:26:49,065 - ryuk - INFO - [detector.py:22] - FastALPR initialized on cuda
+2026-03-24 23:27:16,522 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:27:38,409 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:28:35,475 - ryuk - INFO - [detector.py:22] - FastALPR initialized on cuda
+2026-03-24 23:28:35,743 - ryuk - INFO - [ocr.py:12] - PlateOCR Refiner initialized (lightweight mode)
+2026-03-24 23:28:35,744 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 23:28:35,744 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:28:42,940 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:28:45,113 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 23:28:46,070 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:30:07,688 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:30:10,256 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)
+2026-03-24 23:30:10,731 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:31:09,001 - ryuk - INFO - [detector.py:22] - FastALPR initialized on cuda
+2026-03-24 23:31:09,274 - ryuk - INFO - [ocr.py:12] - PlateOCR Refiner initialized (lightweight mode)
+2026-03-24 23:31:09,275 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 23:31:09,275 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:32:35,166 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:32:57,428 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:33:50,701 - ryuk - INFO - [detector.py:22] - FastALPR initialized on cuda
+2026-03-24 23:33:50,933 - ryuk - INFO - [ocr.py:12] - PlateOCR Refiner initialized (lightweight mode)
+2026-03-24 23:33:50,934 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 23:33:50,934 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:34:01,039 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:34:54,008 - ryuk - INFO - [detector.py:22] - FastALPR initialized on cuda
+2026-03-24 23:34:54,232 - ryuk - INFO - [ocr.py:12] - PlateOCR Refiner initialized (lightweight mode)
+2026-03-24 23:34:54,232 - ryuk - INFO - [storage.py:15] - ALPR Storage initialized (DB: alpr)
+2026-03-24 23:34:54,233 - ryuk - INFO - [cache.py:9] - ALPR Redis Cache initialized (TTL: 30s)
+2026-03-24 23:35:01,196 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-24 23:35:03,895 - ryuk - INFO - [engine.py:85] - [IO BINDING] Enabled for Face Detection
+2026-03-24 23:35:05,120 - ryuk - INFO - [nice_gui.py:469] - UI: Initialized session for FRONT_HOME (Main: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1, Sub: None)

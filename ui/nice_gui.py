@@ -45,6 +45,7 @@ from ui.nice_components.widgets.intel_panel_item import IntelPanelItem
 from ui.nice_components.views.grid_view import GridView
 from ui.nice_components.views.enrollment_view import EnrollmentView
 from ui.nice_components.views.registry_view import RegistryView
+from ui.nice_components.views.camera_mgmt_view import CameraMgmtView
 from ui.nice_components.views.system_view import SystemView
 
 # Setup logging
@@ -96,17 +97,18 @@ class NiceDashboard:
             # MAIN WORKSPACE
             with ui.column().classes('h-full grow p-0 relative overflow-hidden'):
                 # 1. MODERN TOP NAVIGATION
-                with ui.row().classes('absolute top-6 left-1/2 -translate-x-1/2 modern-nav items-center gap-2 opacity-40 hover:opacity-100 transition-opacity duration-500 hover:duration-200 group'):
+                with ui.row().classes('absolute top-6 left-1/2 -translate-x-1/2 modern-nav items-center gap-1 no-wrap opacity-40 hover:opacity-100 transition-opacity duration-500 hover:duration-200 group min-w-max'):
                     # Logo
                     ui.image('/static/logo.png').classes('w-8 h-8 mr-2 logo-glow cursor-pointer').on('click', lambda: self.switch_view(0))
                     
                     self.nav_btns = {}
                     nav_items = {
-                        0: ("CAMERAS", "grid_view"),
-                        1: ("ENROLL", "person_add"),
-                        2: ("REGISTRY", "badge"),
-                        3: ("CONFIG", "settings"),
-                        4: ("SYSTEM", "dns")
+                        0: ("DASHBOARD", "grid_view"),
+                        1: ("CAMERAS", "videocam"),
+                        2: ("ENROLL", "person_add"),
+                        3: ("REGISTRY", "badge"),
+                        4: ("CONFIG", "settings"),
+                        5: ("SYSTEM", "dns")
                     }
                     
                     for i, (label, icon) in nav_items.items():
@@ -119,6 +121,7 @@ class NiceDashboard:
                 with ui.column().classes('w-full h-full p-4 pt-20'):
                     with ui.tabs().classes('hidden') as self.tabs:
                         ui.tab('cameras')
+                        ui.tab('mgmt')
                         ui.tab('enroll')
                         ui.tab('registry')
                         ui.tab('config')
@@ -126,7 +129,8 @@ class NiceDashboard:
 
                     with ui.tab_panels(self.tabs, value='cameras').classes('w-full grow bg-transparent').style('height: calc(100vh - 120px)'):
                         self.grid_view = GridView(self._on_add_camera, self._on_fullscreen, self._on_delete_camera)
-                        # grid_view.create_add_card() call moved to _load_initial_state
+                        with ui.tab_panel('mgmt'):
+                            self.camera_mgmt_view = CameraMgmtView()
                         self.enroll_view = EnrollmentView(on_upload=self._on_enroll_upload, on_submit=self._on_enroll_submit)
                         self.registry_view = RegistryView(on_search=self._on_registry_search)
                         self.registry_view.set_callbacks(
@@ -198,8 +202,22 @@ class NiceDashboard:
             temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
             if hasattr(sv, 'sys_gpu_temp'): sv.sys_gpu_temp.set_text(f'{temp}°C')
 
-            # GPU Processes
-            procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+            # GPU Processes (Compute + Graphics)
+            try:
+                compute_procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+            except: compute_procs = []
+            try:
+                graphics_procs = pynvml.nvmlDeviceGetGraphicsRunningProcesses(handle)
+            except: graphics_procs = []
+            
+            # Combine and deduplicate
+            all_procs = {p.pid: p for p in compute_procs}
+            for p in graphics_procs:
+                if p.pid not in all_procs or p.usedGpuMemory > all_procs[p.pid].usedGpuMemory:
+                    all_procs[p.pid] = p
+            
+            procs = sorted(all_procs.values(), key=lambda x: x.usedGpuMemory, reverse=True)
+
             if hasattr(sv, 'gpu_process_container'):
                 sv.gpu_process_container.clear()
                 if not procs:
@@ -208,10 +226,18 @@ class NiceDashboard:
                 else:
                     for p in procs:
                         try:
-                            proc_info = psutil.Process(p.pid)
+                            # Attempt psutil info with fallback
+                            proc_name = "Unknown"
+                            try:
+                                proc_info = psutil.Process(p.pid)
+                                proc_name = proc_info.name()
+                            except: pass
+
                             with ui.row().classes('w-full items-center gap-4 p-2 border-b border-white/5').move(sv.gpu_process_container):
                                 ui.label(str(p.pid)).classes('text-[10px] font-mono opacity-40 w-12')
-                                ui.label(proc_info.name()).classes('text-[12px] font-bold grow')
+                                ui.label(proc_name).classes('text-[12px] font-bold grow')
+                                workload_str = "Active" # NVML per-process util is often unreliable on some drivers
+                                ui.label(workload_str).classes('text-[10px] bg-white/5 px-2 py-0.5 rounded opacity-60')
                                 ui.label(f"{p.usedGpuMemory // (1024**2)} MB").classes('text-[11px] font-mono text-purple-300')
                         except: continue
             
@@ -334,7 +360,7 @@ class NiceDashboard:
 
     def switch_view(self, idx: int):
 
-        views = {0: 'cameras', 1: 'enroll', 2: 'registry', 3: 'config', 4: 'system'}
+        views = {0: 'cameras', 1: 'mgmt', 2: 'enroll', 3: 'registry', 4: 'config', 5: 'system'}
         self.tabs.value = views[idx]
         for i, btn in self.nav_btns.items():
             if i == idx: btn.classes('active')
@@ -419,25 +445,28 @@ class NiceDashboard:
         except Exception as e:
             ui.notify(f"Search failed: {e}", type='negative')
 
-    def _add_camera_to_ui(self, client_id, url=None):
+    def _add_camera_to_ui(self, client_id, url=None, sub_url=None):
         if client_id not in self.camera_cards:
-            # Persistent check for saved source if not provided
+            # Persistent check for saved sources if not provided
             if not url:
                 try:
                     db = get_sync_db()
                     if db is not None:
                         cam = db.cameras.find_one({"client_id": client_id})
-                        if cam: url = cam.get('source')
+                        if cam: 
+                            url = cam.get('rtsp_url') or cam.get('source')
+                            sub_url = cam.get('substream_url')
                 except: pass
 
             # Enable session if url is available
-            if url and client_id not in active_sessions:
+            if (url or sub_url) and client_id not in active_sessions:
                 from components.processor import Processor
-                proc = Processor(client_id, source_url=url)
+                # Processor uses sub_url for grid/inference if available
+                proc = Processor(client_id, source_url=url, substream_url=sub_url)
                 active_sessions[client_id] = proc
                 proc.add_listener(self)
                 proc.start()
-                logger.info(f"UI: Initialized session for {client_id} -> {url}")
+                logger.info(f"UI: Initialized session for {client_id} (Main: {url}, Sub: {sub_url})")
 
             card = self.grid_view.add_camera(client_id)
             self.camera_cards[client_id] = card
@@ -466,7 +495,7 @@ class NiceDashboard:
     async def _subscribe_alerts(self):
         try:
             pubsub = cache.pubsub()
-            pubsub.subscribe('security_alerts')
+            pubsub.subscribe('security_alerts', 'alpr:events')
             while not app.is_stopping:
                 msg = await asyncio.to_thread(pubsub.get_message, ignore_subscribe_messages=True, timeout=1.0)
                 if msg:
@@ -477,29 +506,28 @@ class NiceDashboard:
             print(f"DEBUG: Alert subscriber error: {e}")
 
     def _update_intel(self, metadata: dict):
-        aadhar = metadata.get('aadhar')
-        if not aadhar: return
+        # Unique ID for the card (aadhar for faces, plate_number for vehicles)
+        intel_id = metadata.get('aadhar') or metadata.get('plate_number')
+        if not intel_id: return
         
-        camera = metadata.get('source', '')
+        camera = metadata.get('source') or metadata.get('camera_id', '')
         now = time.time()
         
-        # === COOLDOWN: only increment counter max once every 3 seconds per person ===
-        last_update = self.intel_last_seen.get(aadhar, 0)
-        if aadhar in self.intel_elements and (now - last_update) < 3.0:
-            return  # Suppress rapid-fire duplicates; card already exists and was updated recently
+        # Deduplication and counters - keyed by intel_id so each person/vehicle shows only once
+        self.intel_last_seen[intel_id] = now
+        self.intel_counts[intel_id] = self.intel_counts.get(intel_id, 0) + 1
+        self.intel_is_active[intel_id] = True
         
-        # Deduplication and counters - keyed by aadhar so each person shows only once
-        self.intel_last_seen[aadhar] = now
-        self.intel_counts[aadhar] = self.intel_counts.get(aadhar, 0) + 1
-        self.intel_is_active[aadhar] = True
-        
-        if aadhar not in self.intel_elements:
+        if intel_id not in self.intel_elements:
             with self.intel_container:
-                item = IntelPanelItem(metadata).on('click', lambda a=aadhar: self._show_activity_tracking(a))
-                self.intel_elements[aadhar] = item
+                # Add click handler only if it's a plate or has aadhar
+                item = IntelPanelItem(metadata)
+                if metadata.get('aadhar'):
+                    item.on('click', lambda a=intel_id: self._show_activity_tracking(a))
+                self.intel_elements[intel_id] = item
         else:
             # Update the existing card instead of adding a new one
-            self.intel_elements[aadhar].update_count(self.intel_counts[aadhar], camera)
+            self.intel_elements[intel_id].update_count(self.intel_counts[intel_id], camera)
 
     def _show_activity_tracking(self, aadhar: str):
         profile = get_profile(aadhar) or {}
@@ -681,6 +709,7 @@ class NiceDashboard:
                 # 2. CAMERA DETAILS
                 with ui.column().classes('w-full gap-4'):
                     name_input = ui.input('CAMERA NAME').classes('w-full').props('dense dark placeholder="e.g. Front Door, Parking Lot"')
+                    sub_input  = ui.input('SUBSTREAM URL (Optional)').classes('w-full').props('dense dark placeholder="rtsp://... (for AI/Grid)"')
                     with ui.row().classes('w-full gap-4'):
                         user_input = ui.input('USERNAME').classes('flex-1').props('dense dark placeholder="admin"')
                         pass_input = ui.input('PASSWORD').classes('flex-1').props('dense dark placeholder="password" password')
@@ -711,7 +740,8 @@ class NiceDashboard:
                     except:
                         url = f"rtsp://{user}:{pwd}@{ip}:{port}/"
                     
-                    self._link_camera(cid, url, dialog)
+                    sub_url = sub_input.value.strip() if sub_input.value else None
+                    self._link_camera(cid, url, dialog, sub_url=sub_url)
 
                 ui.button('ADD CAMERA', on_click=proceed_link).classes('w-full py-4 cyber-btn mt-2').props('unelevated')
             
@@ -721,21 +751,21 @@ class NiceDashboard:
             ui.button('CLOSE', on_click=dialog.close).classes('self-center opacity-30 hover:opacity-100 text-[10px] font-black tracking-widest mt-4').props('flat')
         dialog.open()
 
-    def _link_camera(self, cid: str, url: str, dialog):
+    def _link_camera(self, cid: str, url: str, dialog, sub_url: str = None):
         if not cid or not url:
             ui.notify("Missing ID or URL", type='warning')
             return
             
         try:
             # 1. Persistence (Include the RTSP URL)
-            register_camera_metadata(cid, ["Manual"], url)
+            register_camera_metadata(cid, ["Manual"], url, substream_url=sub_url)
             
             # 2. Immediate Initialization
             from components.processor import Processor
             if cid in active_sessions:
                 active_sessions[cid].stop()
                 
-            proc = Processor(cid, source_url=url)
+            proc = Processor(cid, source_url=url, substream_url=sub_url)
             active_sessions[cid] = proc
             proc.add_listener(self)
             proc.start()
@@ -752,13 +782,52 @@ class NiceDashboard:
             logger.error(f"Link Error: {e}")
 
     def _on_fullscreen(self, client_id: str):
+        # 1. Fetch the primary (high-res) URL from DB if not already in session
+        source_url = None
+        current_proc = active_sessions.get(client_id)
+        if current_proc:
+            source_url = current_proc.source_url
+            
+        if not source_url:
+            try:
+                db = get_sync_db()
+                cam = db.cameras.find_one({"client_id": client_id})
+                if cam: source_url = cam.get('rtsp_url') or cam.get('source')
+            except: pass
+
+        # 2. Logic: If we have a high-res URL, we start a TEMPORARY high-res session 
+        # so AI/Grid continue on SUB-STREAM while we watch in HIGH-RES.
+        highres_cid = f"{client_id}:highres"
+        
         with ui.dialog().classes('w-full h-full') as dialog:
             dialog.props('maximized')
+            
+            def _cleanup_highres():
+                if highres_cid in active_sessions:
+                    active_sessions[highres_cid].stop()
+                    active_sessions.pop(highres_cid, None)
+                dialog.close()
+
             with ui.card().classes('w-full h-full p-0 bg-black items-center justify-center relative overflow-hidden'):
-                encoded_cid = urllib.parse.quote(client_id)
-                ui.interactive_image(f"/stream/{encoded_cid}").classes('h-full')
-                ui.button(icon='close', on_click=dialog.close).props('flat round color=white').classes('absolute top-4 right-4 z-50 bg-black/20')
-                ui.label(f"TACTICAL FEED: {client_id}").classes('absolute top-4 left-4 font-black tracking-[4px] opacity-20 text-[10px]')
+                if source_url:
+                    from components.processor import Processor
+                    if highres_cid not in active_sessions:
+                        # Temporary HIGH RES processor (No inference to keep it fast/light for UI)
+                        hr_proc = Processor(highres_cid, source_url=source_url, enable_ingestion=False)
+                        active_sessions[highres_cid] = hr_proc
+                        hr_proc.start()
+                    
+                    encoded_cid = urllib.parse.quote(highres_cid)
+                    ui.interactive_image(f"/stream/{encoded_cid}").classes('h-full')
+                else:
+                    # Fallback to current (likely sub) stream
+                    encoded_cid = urllib.parse.quote(client_id)
+                    ui.interactive_image(f"/stream/{encoded_cid}").classes('h-full')
+
+                ui.button(icon='close', on_click=_cleanup_highres).props('flat round color=white').classes('absolute top-4 right-4 z-50 bg-black/20')
+                ui.label(f"HIGH RESOLUTION FEED: {client_id}").classes('absolute top-4 left-4 font-black tracking-[4px] opacity-20 text-[10px]')
+                
+        dialog.on('close', _cleanup_highres)
         dialog.open()
 
     def _on_delete_camera(self, client_id: str):
@@ -788,7 +857,14 @@ class NiceDashboard:
             return
         
         try:
-            enroll_face(data['name'], self.uploaded_image_bytes, data)
+            enroll_face(
+                aadhar=data['aadhar'],
+                name=data['name'],
+                image_bytes=self.uploaded_image_bytes,
+                threat_level=data['threat_level'],
+                phone=data['phone'],
+                address=data['address']
+            )
             ui.notify(f"Subject enrolled: {data['name']}", type='positive')
             self.enroll_view.clear()
             self.uploaded_image_bytes = None

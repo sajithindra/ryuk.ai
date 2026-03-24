@@ -145,18 +145,25 @@ class WatchdogIndexer:
         except Exception: pass
         logger.info(f"FAISS: Loaded {len(embeddings)} vectors for {len(identities)} identities.")
 
-    def enroll_face(self, image_path: str, aadhar: str, name: str,
+    def enroll_face(self, aadhar: str, name: str, image_bytes: bytes = None, image_path: str = None,
                     threat_level: str = "Low", phone: str = "", address: str = ""):
         from core.ai_processor import get_ai_processor
         ai = get_ai_processor()
         
-        if not os.path.exists(image_path): raise ValueError(f"Image not found: {image_path}")
-        frame = cv2.imread(image_path)
+        if image_bytes:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        elif image_path:
+            if not os.path.exists(image_path): raise ValueError(f"Image not found: {image_path}")
+            frame = cv2.imread(image_path)
+        else:
+            raise ValueError("Either image_bytes or image_path must be provided.")
+
         if frame is None: raise ValueError("Could not decode image.")
 
         result = ai.get(frame)
         faces = result.get("faces", [])
-        if not faces: raise ValueError("No faces detected.")
+        if not faces: raise ValueError("No faces detected in the photo.")
         if len(faces) > 1: raise ValueError("Multiple faces in enrolment image.")
 
         face = faces[0]
@@ -260,11 +267,14 @@ class WatchdogIndexer:
             logger.info(f"Watchdog: Logged {aadhar} @ {location}")
         except Exception as e: logger.error(f"Watchdog: Log failed — {e}")
 
-    def get_activity_report(self, aadhar: str, limit: int = 50,
+    def get_activity_report(self, aadhar: str | None, camera_id: str | None = None, limit: int = 50,
                             days_ago: int | None = None) -> list[dict]:
         if self._activity_col is None: return []
         try:
-            query: dict = {"aadhar": aadhar}
+            query: dict = {}
+            if aadhar: query["aadhar"] = aadhar
+            if camera_id: query["client_id"] = camera_id
+            
             if days_ago is not None:
                 query["timestamp"] = {"$gte": datetime.now() - timedelta(days=days_ago)}
             return list(self._activity_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(limit))
@@ -278,12 +288,14 @@ class WatchdogIndexer:
         cache_str.delete(f"cache:cam_loc:{client_id}", f"cache:cam_dev:{client_id}")
         logger.info(f"MongoDB: Deleted Camera {client_id}")
 
-    def register_camera_metadata(self, client_id: str, locations: list, source: str = None):
+    def register_camera_metadata(self, client_id: str, locations: list, source: str = None, substream_url: str = None, name: str = None):
         if self._cameras_col is None: return
         update_data = {"locations": locations[:2]}
-        if source: update_data["source"] = source
+        if source: update_data["rtsp_url"] = source # Prefer 'rtsp_url' consistently
+        if substream_url: update_data["substream_url"] = substream_url
+        if name: update_data["name"] = name
         self._cameras_col.update_one({"client_id": client_id}, {"$set": update_data}, upsert=True)
-        logger.info(f"MongoDB: Camera {client_id} → {locations} (Source: {source})")
+        logger.info(f"MongoDB: Camera {client_id} → {locations} (Name: {name}, Source: {source}, Sub: {substream_url})")
 
     def get_all_profiles(self) -> list[dict]:
         if self._profiles_col is None: return []

@@ -28,6 +28,7 @@ DATA_DIR       = os.path.join(BASE_DIR, "data")
 MODELS_DIR     = os.path.join(DATA_DIR, "models")
 TRT_CACHE_DIR  = os.path.join(DATA_DIR, "trt_cache")
 IDENTITIES_PKL = os.path.join(DATA_DIR, "identities.pkl")
+ALPR_CONFIG_PATH = os.path.join(BASE_DIR, "config", "alpr_config.yaml")
 
 
 

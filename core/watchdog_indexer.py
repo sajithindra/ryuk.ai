@@ -23,7 +23,8 @@ def get_activity_report(aadhar, limit=50, days_ago=None):
     return _indexer.get_activity_report(aadhar, limit, days_ago)
 def augment_identity(aadhar, emb):  _indexer.augment_identity(aadhar, emb)
 def delete_camera(cid):             _indexer.delete_camera(cid)
-def register_camera_metadata(cid, locs, source=None): _indexer.register_camera_metadata(cid, locs, source)
+def register_camera_metadata(cid, locs, source=None, substream_url=None): _indexer.register_camera_metadata(cid, locs, source, substream_url=substream_url)
+
 
 # Legacy aliases
 faiss_index   = property(lambda _: _indexer._faiss_index)
