@@ -43,18 +43,18 @@ SCORE_HISTORY_SIZE     = 100   # Sliding window for distribution tracking
 MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
-FACE_MAX_INACTIVE_S   = 10.0   # Allowed to stay for 10s without detection
-FACE_PINNED_MAX_INACTIVE_S = 60.0 # How long to keep a PINNED (identified) track without detections
+FACE_MAX_INACTIVE_S   = 3.0    # Remove unidentified face box after 3s without detection
+FACE_PINNED_MAX_INACTIVE_S = 30.0 # Keep identified person track for 30s
 FACE_TRACK_MAX_DIST   = 400    # Increased for fast movement and head twists
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
 
 # GLOBAL AI PROCESSOR BATCHING
-AI_BATCH_SIZE = 4            # Number of cameras/frames to batch together
-AI_BATCH_TIMEOUT_MS = 1      # Reduced from 10ms to 1ms for < 12ms total latency
+AI_BATCH_SIZE = 4            # Smaller batches for lower latency
+AI_BATCH_TIMEOUT_MS = 5      # 5ms timeout balances throughput and latency
 
 # Performance/Throttling
 INPUT_FPS        = 30        # Expected camera input FPS
-PROCESSING_FPS   = 5         # Target processing/display FPS
+PROCESSING_FPS   = 25        # Target processing/display FPS (Smoothness)
 FRAME_SKIP       = INPUT_FPS // PROCESSING_FPS
 
 INFERENCE_THROTTLE = 1       # Process every Nth frame (Detect/Embed) relative to PROCESSING_FPS
@@ -62,7 +62,7 @@ MAX_INFERENCE_SIZE = 640     # Optimal for TensorRT/InsightFace
 
 # DeepSORT Tracking
 TRACKER_MAX_AGE = 300         # Sustained for 10s at 30fps
-TRACKER_N_INIT  = 3          # Min frames to confirm a track
+TRACKER_N_INIT  = 1          # Show face boxes immediately (1 frame to confirm)
 TRACKER_MATCH_THRESHOLD = 0.7 # Cosine distance threshold for appearance matching
 TRACKER_IOU_THRESHOLD   = 0.3 # IoU threshold for spatial matching
 
@@ -87,6 +87,7 @@ SERVER_PORT = 8000
 # ---------------------------------------------------------------------------
 RTSP_TRANSPORT = "tcp"  # Use TCP for more reliable delivery and lower jitter
 USE_FFMPEG_CUDA = True  # Set to True to force GPU decoding via FFmpeg sub-process (NVDEC)
+USE_GSTREAMER = True    # Set to True to use GStreamer for low-latency RTSP decoding
 RTSP_LOW_LATENCY_FLAGS = [
     "fflags+nobuffer",
     "fflags+igndts",
@@ -97,6 +98,7 @@ RTSP_LOW_LATENCY_FLAGS = [
 VIDEO_JPEG_QUALITY = 85
 VIDEO_DRAW_THICKNESS_SCALE = 400
 VIDEO_FONT_SCALE_BASE = 1600.0
+RTSP_URL_TEMPLATE = os.getenv("RTSP_URL_TEMPLATE", "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel=1&subtype=1")
 
 # ---------------------------------------------------------------------------
 # UI

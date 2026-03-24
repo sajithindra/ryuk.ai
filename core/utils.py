@@ -1,7 +1,39 @@
 import subprocess
 import socket
 import re
+import psutil
 from core.logger import logger
+
+def get_network_interfaces():
+    """
+    Returns a list of active network interfaces with their IP and type (WiFi vs LAN).
+    """
+    interfaces = []
+    # Get all network interface addresses
+    if_addrs = psutil.net_if_addrs()
+    # Get all network interface status
+    if_stats = psutil.net_if_stats()
+
+    for iface_name, addrs in if_addrs.items():
+        # Check if interface is up
+        if iface_name in if_stats and not if_stats[iface_name].isup:
+            continue
+            
+        for addr in addrs:
+            if addr.family == socket.AF_INET:
+                ip = addr.address
+                if ip == '127.0.0.1':
+                    continue
+                
+                # Guess type based on name
+                if_type = 'wifi' if any(x in iface_name.lower() for x in ['wlan', 'wifi', 'wlp']) else 'lan'
+                
+                interfaces.append({
+                    "name": iface_name,
+                    "ip": ip,
+                    "type": if_type
+                })
+    return interfaces
 
 def get_local_ip():
     """Returns the primary local IP address."""

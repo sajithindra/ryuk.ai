@@ -1,47 +1,13 @@
 import os
 import sys
 
-# ============================================================================
-# GPU BOOTSTRAP — Must run before any ONNX/InsightFace/CUDA import.
-# cuDNN 9.19.1 is installed at /usr/lib/x86_64-linux-gnu but may not be in
-# the active LD_LIBRARY_PATH depending on the shell environment.
-# We also include the venv nvidia packages as a secondary source.
-# ============================================================================
-def _bootstrap():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    venv_python = os.path.normpath(os.path.join(root, ".venv", "bin", "python3"))
-    is_venv = hasattr(sys, 'real_prefix') or (sys.base_prefix != sys.prefix)
-    
-    # 1. Choose target executable (Prefer .venv)
-    target_exe = venv_python if (not is_venv and os.path.exists(venv_python)) else sys.executable
-    
-    # 2. Build LD_LIBRARY_PATH for GPU
-    candidate_dirs = []
-    
-    # Auto-discover all nvidia venv libs (cudnn, cublas, nvjitlink, etc.)
-    # VENV LIBS FIRST to avoid system symbol conflicts (e.g. libnvJitLink)
-    venv_site = os.path.join(root, ".venv", "lib", "python3.12", "site-packages")
-    nvidia_root = os.path.join(venv_site, "nvidia")
-    if os.path.isdir(nvidia_root):
-        for sub in os.listdir(nvidia_root):
-            lib_path = os.path.join(nvidia_root, sub, "lib")
-            if os.path.isdir(lib_path):
-                candidate_dirs.append(lib_path)
-    
-    # System libs LAST
-    candidate_dirs.extend(["/usr/lib/x86_64-linux-gnu", "/usr/local/cuda/lib64"])
-    current = os.environ.get("LD_LIBRARY_PATH", "")
-    existing = set(current.split(":")) if current else set()
-    additions = [d for d in candidate_dirs if os.path.isdir(d) and d not in existing]
-    
-    # 3. Restart if executable changed or environment needs update
-    if (target_exe != sys.executable) or additions:
-        if additions:
-            os.environ["LD_LIBRARY_PATH"] = ":".join(additions) + ((":" + current) if current else "")
-        # print(f"[*] Bootstrapping environment via {target_exe}")
-        os.execv(target_exe, [target_exe] + sys.argv)
+# Add project root to path
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.append(ROOT)
 
-_bootstrap()
+from core.bootstrap import bootstrap_gpu
+bootstrap_gpu()
 
 # ============================================================================
 # Normal imports — GPU libs are now resolvable by the dynamic linker
@@ -49,8 +15,6 @@ _bootstrap()
 import time
 import json
 
-# Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.watchdog_indexer as watchdog
 from core.state import cache, cache_str
@@ -115,19 +79,31 @@ def run_sink_service():
                                 watchdog.augment_identity(aadhar, face_obj.get('embedding'))
                                 cache_str.set(aug_lock, "1", ex=3600)
                 
-                # 3. Security Alerts
-                if threat == "High":
-                    alert_lock = f"alert_lock:{name}:{client_id}"
-                    if not cache_str.get(alert_lock):
-                        msg = json.dumps({
-                            "type":      "SECURITY_ALERT",
-                            "message":   f"High Security Alert: {name} spotted at {client_id}",
-                            "name":      name,
-                            "source":    client_id,
-                            "timestamp": time.time(),
-                        })
-                        cache.publish("security_alerts", msg)
-                        cache_str.set(alert_lock, "1", ex=int(ALERT_COOLDOWN_S))
+                # 3. Intelligence & Security Alerts
+                if aadhar:
+                    # Publish to real-time feed for dashboard
+                    msg_data = {
+                        "type": "SECURITY_ALERT" if threat == "High" else "INTEL_UPDATE",
+                        "message": f"{name} identified at {client_id}",
+                        "name": name,
+                        "aadhar": aadhar,
+                        "threat_level": threat,
+                        "source": client_id,
+                        "timestamp": time.time(),
+                    }
+                    
+                    # High priority alerts get published immediately (with cooldown)
+                    if threat == "High":
+                        alert_lock = f"alert_lock:{aadhar}:{client_id}"
+                        if not cache_str.get(alert_lock):
+                            cache.publish("security_alerts", json.dumps(msg_data))
+                            cache_str.set(alert_lock, "1", ex=int(ALERT_COOLDOWN_S))
+                    else:
+                        # Normal intelligence updates
+                        intel_lock = f"intel_lock:{aadhar}:{client_id}"
+                        if not cache_str.get(intel_lock):
+                            cache.publish("security_alerts", json.dumps(msg_data))
+                            cache_str.set(intel_lock, "1", ex=10) # 10s cooldown for regular intel
 
             res_key = f"stream:{client_id}:results"
             cache.rpush(res_key, serde.pack(packet))

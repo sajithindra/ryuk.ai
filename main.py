@@ -1,95 +1,111 @@
 import os
 import sys
+import time
 import socket
-import threading
+import logging
 import subprocess
-import atexit
 
-# ============================================================================
-# GPU BOOTSTRAP — Must run before any ONNX/InsightFace/CUDA import.
-# cuDNN 9.19.1 is installed at /usr/lib/x86_64-linux-gnu but may not be in
-# the active LD_LIBRARY_PATH depending on the shell environment.
-# We also include the venv nvidia packages as a secondary source.
-# ============================================================================
+# Suppress harmless uvicorn/asyncio shutdown tracebacks (CancelledError, WouldBlock)
+class _ShutdownFilter(logging.Filter):
+    _suppress = (
+        'asyncio.exceptions.CancelledError',
+        'anyio.WouldBlock',
+        'Exception in ASGI application',
+    )
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(s in msg for s in self._suppress)
+
+for _name in ('uvicorn.error', 'uvicorn.access', 'uvicorn'):
+    logging.getLogger(_name).addFilter(_ShutdownFilter())
+
+# Add current directory to sys.path for proper relative imports in child processes
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from config import SERVER_PORT, MONGO_URI, DB_NAME
+
+# ---------------------------------------------------------------------------
+# GLOBAL BOOTSTRAP: Managed Library Paths (TensorRT/CUDA)
+# ---------------------------------------------------------------------------
 def _bootstrap():
-    root = os.path.dirname(os.path.abspath(__file__))
-    venv_python = os.path.normpath(os.path.join(root, ".venv", "bin", "python3"))
-    is_venv = hasattr(sys, 'real_prefix') or (sys.base_prefix != sys.prefix)
+    """Heavy initialization within a controlled scope to avoid process pollution."""
+    print("* Ryuk AI — NiceGUI Terminal Starting", flush=True)
     
-    # 1. Choose target executable (Prefer .venv)
-    target_exe = venv_python if (not is_venv and os.path.exists(venv_python)) else sys.executable
+    # 1. Environment cleanup for GPU libraries
+    tensorrt_path = "/tmp/pip-install-5_vpsqas/onnxruntime-gpu_f68a5293444445889601f016599b4d00/onnxruntime/capi/lib"
+    if tensorrt_path not in os.environ.get("LD_LIBRARY_PATH", ""):
+        os.environ["LD_LIBRARY_PATH"] = f"{tensorrt_path}:{os.environ.get('LD_LIBRARY_PATH', '')}"
     
-    # 2. Build LD_LIBRARY_PATH for GPU
-    candidate_dirs = []
-    
-    # Auto-discover all nvidia venv libs (cudnn, cublas, nvjitlink, etc.)
-    # VENV LIBS FIRST to avoid system symbol conflicts (e.g. libnvJitLink)
-    venv_site = os.path.join(root, ".venv", "lib", "python3.12", "site-packages")
-    nvidia_root = os.path.join(venv_site, "nvidia")
-    if os.path.isdir(nvidia_root):
-        for sub in os.listdir(nvidia_root):
-            lib_path = os.path.join(nvidia_root, sub, "lib")
-            if os.path.isdir(lib_path):
-                candidate_dirs.append(lib_path)
-    
-    # System libs LAST
-    candidate_dirs.extend(["/usr/lib/x86_64-linux-gnu", "/usr/local/cuda/lib64"])
-    current = os.environ.get("LD_LIBRARY_PATH", "")
-    existing = set(current.split(":")) if current else set()
-    additions = [d for d in candidate_dirs if os.path.isdir(d) and d not in existing]
-    
-    # 3. Restart if executable changed or environment needs update
-    if (target_exe != sys.executable) or additions:
-        if additions:
-            os.environ["LD_LIBRARY_PATH"] = ":".join(additions) + ((":" + current) if current else "")
-        # print(f"[*] Bootstrapping environment via {target_exe}")
-        os.execv(target_exe, [target_exe] + sys.argv)
+    # 2. Lazy Import UI components to prevent early NiceGUI initialization
+    import ui.nice_gui
+    return ui.nice_gui
 
-_bootstrap()
-
-# ============================================================================
-# Normal imports — GPU libs are now resolvable by the dynamic linker
-# ============================================================================
-from ui.nice_gui import run_nicegui
-from config import SERVER_PORT
-
-if __name__ == "__main__":
+# ---------------------------------------------------------------------------
+# LAN IP DETECTION
+# ---------------------------------------------------------------------------
+def get_lan_ip():
+    """Detects the current LAN IP for terminal display."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        # Does not need to be reachable
         s.connect(('10.255.255.255', 1))
         IP = s.getsockname()[0]
     except Exception:
         IP = '127.0.0.1'
     finally:
         s.close()
+    return IP
 
-    print("*" * 50)
-    print(f"* Ryuk AI — NiceGUI Terminal Starting")
-    print(f"* Dashboard: http://localhost:{SERVER_PORT}")
-    print(f"* Streaming API: ws://{IP}:{SERVER_PORT}/api/ws/stream")
-    print("*" * 50)
+# ---------------------------------------------------------------------------
+# MAIN ENTRY POINT
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    # 1. Core Process Initialization
+    ng_ui = _bootstrap()
+    lan_ip = get_lan_ip()
 
-    # 1. Start Background Services (Unified Engine & Sink)
-    manager_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "services", "manager.py")
-    print(f"[*] Launching background services via {manager_path}...")
-    
-    # We use subprocess.Popen to let it run in the background
-    # It inherits the current environment (including LD_LIBRARY_PATH from bootstrap)
-    svc_manager = subprocess.Popen([sys.executable, manager_path], 
-                                   stdout=subprocess.PIPE, 
-                                   stderr=subprocess.STDOUT,
-                                   text=True,
-                                   bufsize=1)
-    
-    # Optional: Small thread to pipe manager output to main log/console
-    def pipe_output(proc):
-        for line in proc.stdout:
-            print(f"[MANAGER] {line.strip()}")
-            
-    threading.Thread(target=pipe_output, args=(svc_manager,), daemon=True).start()
-    
-    # Ensure services are killed on exit
-    atexit.register(lambda: svc_manager.terminate())
+    # 2. Start the Background Manager process
+    # This process handles UnifiedEngine and Sink, keeping main.py focused on UI.
+    env = os.environ.copy()
+    manager_proc = subprocess.Popen(
+        [sys.executable, "/home/sajithindra/Projects/ryuk.ai/services/manager.py"],
+        env=env
+    )
 
-    # 2. Run the Dashboard
-    run_nicegui()
+    # 3. Launch the Dashboard
+    print(f"============================================================", flush=True)
+    print(f" RYUK AI DASHBOARD", flush=True)
+    print(f" STATUS: Operational", flush=True)
+    print(f" INTERFACE: http://{lan_ip}:{SERVER_PORT}", flush=True)
+    print(f" SERVICE BIND: 0.0.0.0:{SERVER_PORT}", flush=True)
+    print(f"============================================================", flush=True)
+
+    try:
+        # IMPORTANT: We use ng_ui.ui.run because ng_ui is the module containing the 'ui' object.
+        ng_ui.ui.run(
+            host='0.0.0.0',
+            port=SERVER_PORT,
+            title='Ryuk AI Dashboard',
+            dark=True,
+            reload=False,
+            show=False,
+            uvicorn_logging_level='warning'  # Suppress routine request logs on shutdown
+        )
+    except KeyboardInterrupt:
+        print("\n* Signal Received: Terminating services...")
+    finally:
+        # Ignore any further Ctrl+C during cleanup
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        
+        manager_proc.terminate()
+        try:
+            manager_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            manager_proc.kill()
+        
+        print("* Ryuk AI — Shutdown Complete.")
+        # Hard-exit: skips pymongo/uvloop atexit cleanup races that produce
+        # "Event loop is closed" / thread join tracebacks on repeated Ctrl+C
+        os._exit(0)
+

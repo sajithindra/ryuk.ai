@@ -27,7 +27,7 @@ class HwDecoder:
         self._lock = threading.Lock()
         self.running = False
 
-    def start(self, source: str = "pipe:0"):
+    def start(self, source: str = "pipe:0", extra_input_args: str = ""):
         """
         Starts the FFmpeg process. 
         If source is 'pipe:0', it expects raw bytes via write().
@@ -35,11 +35,24 @@ class HwDecoder:
         with self._lock:
             if self.proc: return
             
-            input_args = f"-f {self.input_format}" if source == "pipe:0" and self.input_format else ""
+            # 1. Input Flags Integration
+            # For RTSP/Network streams, we inject low-latency probesize/analyzeduration if not provided
+            if source.startswith(("rtsp://", "http://", "https://", "rtmp://")):
+                input_flags = "-probesize 128000 -analyzeduration 100000 -rtsp_transport tcp "
+            else:
+                input_flags = ""
+            
+            input_flags += f"{extra_input_args} "
+            input_fmt_args = f"-f {self.input_format}" if source == "pipe:0" and self.input_format else ""
+            
+            # 2. Filter Integration (Scaling to target resolution)
+            # This allows starting FFmpeg WITHOUT knowing source resolution, by forcing output resolution.
+            filter_args = f"-vf scale={self.width}:{self.height}"
+            
             cmd = (
                 f"ffmpeg -y -hide_banner -loglevel error "
-                f"{input_args} -c:v {self.codec} -i {source} "
-                f"-f rawvideo -pix_fmt {self.pix_fmt} -"
+                f"{input_flags} {input_fmt_args} -c:v {self.codec} -i {source} "
+                f"{filter_args} -f rawvideo -pix_fmt {self.pix_fmt} -"
             )
             
             self.proc = subprocess.Popen(
@@ -66,10 +79,10 @@ class HwDecoder:
                 try:
                     if self.proc.stdin:
                         self.proc.stdin.close()
-                    self.proc.terminate()
+                    self.proc.kill()
                     self.proc.wait(timeout=1.0)
-                except:
-                    if self.proc: self.proc.kill()
+                except Exception:
+                    pass
                 self.proc = None
 
     def write(self, data: bytes):

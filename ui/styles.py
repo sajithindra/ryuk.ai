@@ -1,370 +1,261 @@
 """
 ui/styles.py
-Central QSS stylesheet for the Ryuk AI dashboard.
-Import DASHBOARD_QSS and pass it to QMainWindow.setStyleSheet().
+Centralized UI tokens, CSS injection, and theme definitions for Ryuk AI NiceGUI.
 """
+from nicegui import ui
 
-DASHBOARD_QSS = """
-/* ================================================================
-   RYUK AI — Premium Obsidian & Azure Theme
-   Color Tokens:
-     Background   #0A0B10    Surface      #161821
-     Surface+1    #1E202B    Surface+2    #262936
-     Primary      #3B82F6    Error        #EF4444
-     Warning      #F59E0B    Success      #10B981
-     Text High    #F8FAFC    Text Med     #94A3B8
-     Outline      #232634    OutlineVar   #32364D
-   ================================================================ */
+# User-defined Design Tokens
+BG_COLOR = "#050608" # Near Black
+SURFACE_COLOR = "rgba(16, 18, 27, 0.4)" # Glass Surface
+PRIMARY_COLOR = "#00D1FF" # Cyber Cyan
+ACCENT_COLOR = "#7000FF" # Deep Purple Accent
+ERROR_COLOR = "#FF3333"
+SUCCESS_COLOR = "#00FF94"
+TEXT_HIGH = "#F0F2F5"
+TEXT_MED = "#6B7280"
+OUTLINE_COLOR = "rgba(255, 255, 255, 0.08)"
+GLOW_COLOR = "0 0 30px rgba(0, 209, 255, 0.2)"
 
-QMainWindow, QWidget#centralwidget {
-    background-color: #0A0B10;
-}
-QWidget {
-    font-family: 'Outfit', 'Inter', 'Segoe UI', 'Roboto', sans-serif;
-    font-size: 14px;
-    color: #F8FAFC;
-    background-color: transparent;
-}
+def inject_styles():
+    """Injects global CSS into the page head."""
+    ui.query('body').style(f'background-color: {BG_COLOR}; color: {TEXT_HIGH}; font-family: "Outfit", sans-serif; overflow: hidden;')
+    
+    ui.add_head_html(f"""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+            
+            :root {{
+                --primary: {PRIMARY_COLOR};
+                --accent: {ACCENT_COLOR};
+                --success: {SUCCESS_COLOR};
+                --bg: {BG_COLOR};
+                --surface: {SURFACE_COLOR};
+                --outline: {OUTLINE_COLOR};
+                --text: {TEXT_HIGH};
+                --text-muted: {TEXT_MED};
+            }}
 
-/* === TOP COMMAND BAR === */
-#TopBar {
-    background-color: #0A0B10;
-    border-bottom: 1px solid #232634;
-}
-#Logo {
-    color: #3B82F6;
-    font-weight: 700;
-    font-size: 14px;
-    letter-spacing: 2px;
-}
-#PageTitle {
-    color: #94A3B8;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 1px;
-}
-#Clock {
-    color: #64748B;
-    font-size: 11px;
-}
-#StatusLabel {
-    font-size: 10px;
-    font-weight: 600;
-}
+            body {{
+                background: radial-gradient(circle at 50% 0%, #11141d 0%, #050608 100%);
+            }}
 
-/* === NAV RAIL === */
-#NavRail {
-    background-color: #0A0B10;
-    border-right: 1px solid #232634;
-}
-#NavBtn {
-    color: #64748B;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    font-size: 18px;
-}
-#NavBtn:hover {
-    color: #F8FAFC;
-    background-color: rgba(255, 255, 255, 0.05);
-}
-#NavBtnActive {
-    color: #3D7BFF;
-    background-color: rgba(61, 123, 255, 0.1);
-    border: 1px solid rgba(61, 123, 255, 0.2);
-    border-radius: 8px;
-}
+            .cyber-panel {{
+                background: var(--surface) !important;
+                backdrop-filter: blur(25px) saturate(180%);
+                border: 1px solid var(--outline) !important;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+                border-radius: 16px !important;
+            }}
+            
+            .cyber-border-l {{ border-left: 3px solid var(--primary); }}
+            
+            .glow-text {{
+                color: var(--text);
+                text-shadow: 0 0 15px rgba(0, 209, 255, 0.5);
+            }}
+            
+            .scroll-hidden::-webkit-scrollbar {{ display: none; }}
+            
+            .telemetry-bar {{
+                background: rgba(5, 6, 8, 0.7);
+                backdrop-filter: blur(10px);
+                border-bottom: 1px solid var(--outline);
+            }}
+            
+            .nav-icon-btn {{
+                transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                color: var(--text-muted) !important;
+            }}
+            .nav-icon-btn:hover {{
+                color: var(--primary) !important;
+                background: rgba(0, 209, 255, 0.1) !important;
+                transform: translateX(5px) scale(1.1);
+            }}
+            .nav-icon-btn.active {{
+                color: var(--primary) !important;
+                background: rgba(0, 209, 255, 0.15) !important;
+                border: 1px solid rgba(0, 209, 255, 0.3) !important;
+                box-shadow: 0 0 30px rgba(0, 209, 255, 0.3);
+            }}
+            .nav-icon-btn.active i {{ color: var(--primary) !important; }}
 
-/* === CONTENT AREAS === */
-#ContentArea {
-    background-color: #0A0B10;
-}
-#EmptyGridLabel {
-    color: #475569;
-    font-size: 14px;
-}
+            .modern-nav {{
+                background: rgba(10, 12, 18, 0.4) !important;
+                backdrop-filter: blur(20px) saturate(180%);
+                border: 1px solid rgba(255, 255, 255, 0.05) !important;
+                border-radius: 24px !important;
+                padding: 8px 16px !important;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+                transition: all 0.4s ease;
+                z-index: 1000;
+            }}
 
-#IntelPanel {
-    background-color: #0A0B10;
-    border-left: 1px solid #232634;
-}
+            .nav-pill {{
+                border-radius: 16px !important;
+                padding: 4px 12px !important;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                color: rgba(255, 255, 255, 0.5) !important;
+                font-size: 0.85rem !important;
+                font-weight: 600 !important;
+                text-transform: uppercase !important;
+                letter-spacing: 1px !important;
+            }}
+            .nav-pill:hover {{
+                background: rgba(0, 209, 255, 0.05) !important;
+                color: var(--primary) !important;
+                transform: translateY(-2px);
+            }}
+            .nav-pill.active {{
+                background: rgba(0, 209, 255, 0.1) !important;
+                color: var(--primary) !important;
+                border: 1px solid rgba(0, 209, 255, 0.2) !important;
+                box-shadow: 0 0 20px rgba(0, 209, 255, 0.15);
+            }}
 
-#IntelHeader {
-    color: #94A3B8;
-    font-weight: 700;
-    font-size: 11px;
-    letter-spacing: 2px;
-    padding: 16px;
-    border-bottom: 1px solid #232634;
-}
+            .logo-glow {{
+                filter: drop-shadow(0 0 8px rgba(0, 209, 255, 0.4));
+                transition: all 0.5s ease;
+            }}
+            .logo-glow:hover {{
+                filter: drop-shadow(0 0 15px rgba(0, 209, 255, 0.8)) hue-rotate(90deg);
+                transform: scale(1.1);
+            }}
 
-/* === CARDS === */
-#VideoCard {
-    background-color: #161821;
-    border: 1px solid #232634;
-    border-radius: 12px;
-}
-#VideoCard:hover {
-    border-color: #3D7BFF;
-}
+            .cam-card {{
+                position: relative;
+                overflow: hidden;
+                border-radius: 20px !important;
+                border: 1px solid var(--outline) !important;
+                background: rgba(16, 18, 27, 0.6) !important;
+                transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            }}
+            .cam-card:hover {{
+                border-color: var(--primary) !important;
+                transform: translateY(-8px) scale(1.02);
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 209, 255, 0.2);
+                z-index: 10;
+            }}
+            
+            .intel-item {{
+                border-left: 4px solid transparent;
+                transition: all 0.3s ease;
+                border-radius: 12px;
+                background: rgba(255, 255, 255, 0.03);
+                margin-bottom: 8px;
+            }}
+            .intel-item:hover {{
+                background: rgba(255, 255, 255, 0.08);
+                border-left-color: var(--primary);
+                transform: scale(1.02);
+            }}
 
-#PersonCard {
-    background-color: #161821;
-    border: 1px solid #232634;
-    border-radius: 12px;
-}
-#PersonCard[threat="High"]   { border-left: 3px solid #EF4444; }
-#PersonCard[threat="Medium"] { border-left: 3px solid #F59E0B; }
-#PersonCard[threat="Low"]    { border-left: 3px solid #3B82F6; }
+            .cyber-btn {{
+                border-radius: 12px !important;
+                font-weight: 800 !important;
+                letter-spacing: 2px !important;
+                background: linear-gradient(135deg, var(--primary), var(--accent)) !important;
+                box-shadow: 0 4px 15px rgba(0, 209, 255, 0.3) !important;
+            }}
+            .cyber-btn:hover {{
+                filter: brightness(1.2);
+                box-shadow: 0 8px 30px rgba(0, 209, 255, 0.5) !important;
+            }}
 
-#PersonPhoto {
-    border-radius: 24px;
-    background: #0A0B10;
-}
-#PersonPhoto[threat="High"]   { border: 1px solid #EF4444; }
-#PersonPhoto[threat="Medium"] { border: 1px solid #F59E0B; }
-#PersonPhoto[threat="Low"]    { border: 1px solid #3B82F6; }
+            @keyframes pulse-glow {{
+                0% {{ box-shadow: 0 0 5px rgba(0, 209, 255, 0.2); }}
+                50% {{ box-shadow: 0 0 20px rgba(0, 209, 255, 0.5); }}
+                100% {{ box-shadow: 0 0 5px rgba(0, 209, 255, 0.2); }}
+            }}
 
-#IdentifiedSub {
-    color: #64748B;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 1px;
-}
-#IdentifiedName {
-    color: #F8FAFC;
-    font-weight: 600;
-    font-size: 14px;
-}
-#ThreatBadge {
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
-}
-#AttributeLabel {
-    color: #64748B;
-    font-weight: 600;
-    font-size: 10px;
-}
-#AttributeValue {
-    color: #CBD5E1;
-    font-size: 12px;
-}
-#DossierView {
-    background-color: #0A0B10;
-    border: 1px solid #232634;
-    border-radius: 8px;
-    padding: 10px;
-    color: #CBD5E1;
-    font-size: 13px;
-}
+            .active-ai-track {{
+                animation: pulse-glow 2s infinite;
+            }}
 
-/* === FORMS & ENROLLMENT === */
-#EnrollmentHeader {
-    color: #F8FAFC;
-    font-size: 18px;
-    font-weight: 700;
-}
-#EnrollmentSub {
-    color: #64748B;
-    font-size: 12px;
-}
-#PhotoPreview {
-    background: #161821;
-    border: 1px dashed #32364D;
-    border-radius: 12px;
-    color: #32364D;
-    font-size: 40px;
-}
-#PhotoPreview[hasImage="true"] {
-    border: 1px solid #3B82F6;
-    background: #0A0B10;
-}
-#EnrollForm {
-    background: #161821;
-    border: 1px solid #232634;
-    border-radius: 12px;
-}
-#FormSectionHeader {
-    color: #475569;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1px;
-}
-#ActionBtn {
-    background-color: #3B82F6;
-    color: #FFFFFF;
-    font-weight: 700;
-    font-size: 13px;
-    border-radius: 8px;
-    border: none;
-}
-#ActionBtn:hover {
-    background-color: #2563EB;
-}
-#ActionBtn:disabled {
-    background-color: #1E293B;
-    color: #475569;
-}
-#SecondaryBtn {
-    background: #161821;
-    border: 1px solid #232634;
-    color: #94A3B8;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
-}
-#SecondaryBtn:hover {
-    border-color: #3B82F6;
-    color: #3B82F6;
-}
+            .scanline {{
+                width: 100%;
+                height: 100px;
+                z-index: 5;
+                background: linear-gradient(0deg, rgba(0, 209, 255, 0) 0%, rgba(0, 209, 255, 0.1) 50%, rgba(0, 209, 255, 0) 100%);
+                opacity: 0.1;
+                position: absolute;
+                bottom: 100%;
+                animation: scanline 8s linear infinite;
+                pointer-events: none;
+            }}
 
-/* === CENTRAL INTELLIGENCE === */
-#CIHeader {
-    color: #F8FAFC;
-    font-size: 18px;
-    font-weight: 700;
-}
-#CountBadge {
-    color: #10B981;
-    background: rgba(16, 185, 129, 0.1);
-    border-radius: 4px;
-    padding: 4px 12px;
-    font-size: 10px;
-    font-weight: 600;
-}
-#ProfileThumb {
-    border-radius: 20px;
-    background: #0A0B10;
-    border: 1px solid #232634;
-}
-#ProfileName {
-    color: #F8FAFC;
-    font-weight: 600;
-    font-size: 13px;
-}
-#ProfileMeta {
-    color: #64748B;
-    font-size: 10px;
-}
-#RowActionBtn {
-    background: #1E202B;
-    border: 1px solid #232634;
-    border-radius: 4px;
-    font-size: 9px;
-    font-weight: 600;
-}
-#RowActionBtn:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
+            @keyframes scanline {{
+                0% {{ bottom: 100%; }}
+                100% {{ bottom: -100px; }}
+            }}
 
-/* === SYSTEM DIALOGS === */
-QDialog, QMainWindow#EditProfileDialog, QMainWindow#ActivityReportDialog {
-    background-color: #0A0B10;
-}
-#DialogHeader {
-    color: #F8FAFC;
-    font-size: 16px;
-    font-weight: 700;
-}
-#DialogPhoto {
-    background-color: #161821;
-    border: 1px solid #232634;
-    border-radius: 45px;
-}
-#DialogLabel {
-    color: #475569;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
+            .health-pulse {{
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: {SUCCESS_COLOR};
+                box-shadow: 0 0 10px {SUCCESS_COLOR};
+                animation: health-pulse 2s infinite;
+            }}
 
-/* === ACTIVITY LOGS === */
-#LogTime {
-    color: #3B82F6;
-    font-weight: 600;
-    font-size: 11px;
-}
-#LogAction {
-    color: #F8FAFC;
-    font-size: 12px;
-}
-#LogMeta {
-    color: #475569;
-    font-size: 10px;
-}
+            .stat-box {{
+                background: rgba(255,255,255,0.03);
+                border-radius: 8px;
+                padding: 8px 12px;
+                border: 1px solid rgba(255,255,255,0.05);
+            }}
+            .stat-label {{
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: 1px;
+                color: rgba(255,255,255,0.3);
+                text-transform: uppercase;
+            }}
+            .stat-value {{
+                font-family: 'JetBrains Mono', 'Roboto Mono', monospace;
+                font-size: 13px;
+                font-weight: 900;
+            }}
 
-/* === THREAT LEVELS === */
-#ThreatBadge[threat="High"] {
-    color: #EF4444;
-    background: rgba(239, 68, 68, 0.1);
-}
-#ThreatBadge[threat="Medium"] {
-    color: #F59E0B;
-    background: rgba(245, 158, 11, 0.1);
-}
-#ThreatBadge[threat="Low"] {
-    color: #10B981;
-    background: rgba(16, 185, 129, 0.1);
-}
+            @keyframes health-pulse {{
+                0% {{ transform: scale(1); opacity: 1; }}
+                50% {{ transform: scale(1.5); opacity: 0.5; }}
+                100% {{ transform: scale(1); opacity: 1; }}
+            }}
 
-/* === HEALTH & STATUS === */
-#HealthLabel[status="online"], #StatusLabel[status="online"] {
-    color: #10B981;
-}
-#HealthLabel[status="offline"], #StatusLabel[status="offline"] {
-    color: #EF4444;
-}
+            .id-card {{
+                border-radius: 16px !important;
+                background: rgba(255, 255, 255, 0.02) !important;
+                border: 1px solid rgba(255, 255, 255, 0.05) !important;
+                transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                overflow: hidden;
+                backdrop-filter: blur(10px);
+            }}
+            .id-card:hover {{
+                background: rgba(255, 255, 255, 0.06) !important;
+                border_color: var(--primary) !important;
+                transform: translateY(-5px);
+                box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+            }}
+            .id-thumb-container {{
+                position: relative;
+                width: 100%;
+                aspect-ratio: 1 / 1;
+                overflow: hidden;
+                border-radius: 12px;
+                background: rgba(0,0,0,0.2);
+            }}
+            .id-card-btn {{
+                transition: all 0.2s ease;
+                opacity: 0.6;
+            }}
+            .id-card-btn:hover {{
+                opacity: 1;
+                transform: scale(1.1);
+            }}
+        </style>
+    """)
 
-/* === INPUTS === */
-QLineEdit {
-    background-color: #0A0B10;
-    border: 1px solid #232634;
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: #F8FAFC;
-}
-QLineEdit:focus {
-    border-color: #3B82F6;
-}
-
-QComboBox {
-    background-color: #0A0B10;
-    border: 1px solid #232634;
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: #F8FAFC;
-}
-QComboBox:focus {
-    border-color: #3B82F6;
-}
-
-/* === SCROLLBARS === */
-QScrollBar:vertical {
-    border: none; background: transparent;
-    width: 6px; margin: 0;
-}
-QScrollBar::handle:vertical {
-    background: #232634;
-    min-height: 20px; border-radius: 3px;
-}
-QScrollBar::handle:vertical:hover { background: #32364D; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-
-/* === ALERTS === */
-#AlertBanner {
-    background-color: #450A0A;
-    border-bottom: 1px solid #991B1B;
-}
-#AlertLabel {
-    color: #FCA5A5;
-    font-weight: 700;
-}
-#AlertDismissBtn {
-    color: #FCA5A5;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    padding: 4px 12px;
-}
-"""
-
+def get_threat_color(threat: str) -> str:
+    """Returns the CSS color for a given threat level."""
+    return 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'

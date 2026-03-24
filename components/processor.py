@@ -99,7 +99,9 @@ class Processor:
         cap = None
         grabber_thread = None
         hw_decoder = None
+        cap = None
         latest_frame_data = {"frame": None, "lock": threading.Lock(), "running": True}
+        ffmpeg_proc = None # Critical fix for cleanup NameError
 
         if self.source_url:
             if USE_FFMPEG_CUDA:
@@ -211,7 +213,9 @@ class Processor:
                 self._frame_count = (self._frame_count + 1) % 10_000
                 
                 # Push to Micro-Pipeline (Non-blocking)
-                if self._frame_count % INFERENCE_THROTTLE == 0:
+                # Optimization: Only push to ingestion if we are the primary source (RTSP).
+                # WebSocket streams are already pushed by StreamingServer (core/server.py).
+                if self.source_url and self._frame_count % INFERENCE_THROTTLE == 0:
                     try:
                         packet = {
                             "client_id": self.client_id,
@@ -288,7 +292,7 @@ class Processor:
             grabber_thread.join(timeout=1.0)
         if cap:
             cap.release()
-        if ffmpeg_proc:
+        if 'ffmpeg_proc' in locals() and ffmpeg_proc:
             ffmpeg_proc.terminate()
             ffmpeg_proc.wait(timeout=1.0)
 

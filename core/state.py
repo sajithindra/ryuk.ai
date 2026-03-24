@@ -1,12 +1,11 @@
 import redis
 from redis import ConnectionPool
 from collections import deque
-from PyQt6.QtCore import QObject, pyqtSignal
 
-class GlobalSignals(QObject):
-    faiss_updated = pyqtSignal()
-
-global_signals = GlobalSignals()
+# ---------------------------------------------------------------------------
+# Signals (Replaced with lightweight Python threading events where needed)
+# ---------------------------------------------------------------------------
+# GlobalSignals and global_signals (PyQt6) were removed in favor of a headless-friendly architecture.
 
 # ---------------------------------------------------------------------------
 # Redis Connection Configuration
@@ -37,13 +36,7 @@ _string_pool = ConnectionPool(
 cache = redis.Redis(connection_pool=_binary_pool)
 cache_str = redis.Redis(connection_pool=_string_pool)
 
-# Helper to verify connectivity
-try:
-    cache.ping()
-    print("Redis: Connected successfully.")
-except Exception as e:
-    print(f"Redis: Connection failed: {e}")
-    # Fallback/Safety would go here if needed, but Redis is required for this phase.
+# Redis verification is now performed in main.py startup block
 
 # We keep this for UI transition logic to avoid breaking current dashboard polling immediately
 new_stream_signals = deque()

@@ -3,1261 +3,901 @@ import json
 import time
 import asyncio
 import tempfile
+import uuid
+import base64
+import queue
+import urllib.parse
+import subprocess
+import socket
+import logging
+import psutil
 from datetime import datetime
 from typing import Dict, List, Optional
 from fastapi import Response
 from fastapi.responses import StreamingResponse
 from nicegui import ui, app
-import cv2
-import queue
-import base64
-import io
-import urllib.parse
-import psutil
-import subprocess
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
 
-from core.state import cache, cache_str
-from core.database import get_sync_db, profiles_col, cameras_col, init_db
-from core.server import app as streaming_app
-from core.watchdog_indexer import get_all_profiles, delete_profile, register_camera_metadata
+# Ryuk AI Imports
+from core.state import cache, new_stream_signals
+from core.database import get_sync_db, init_db
+from core.server import app as streaming_app, server as ws_server
+from core.watchdog_indexer import (
+    get_all_profiles, delete_profile, update_profile, 
+    enroll_face, get_activity_report, delete_camera,
+    register_camera_metadata, get_profile
+)
+from core.agent import ryuk_agent
+from core.discovery import discover_cameras
 from components.processor import Processor
 from config import (
-    WINDOW_WIDTH, WINDOW_HEIGHT,
     POLL_INTERVAL_MS, ALERT_INTERVAL_MS,
-    HEALTH_INTERVAL_MS, INTEL_PANEL_WIDTH,
-    SERVER_PORT, INTEL_CLEANUP_S
+    HEALTH_INTERVAL_MS, SERVER_PORT, INTEL_CLEANUP_S,
+    RTSP_URL_TEMPLATE
 )
 
-# User-defined Design Tokens
-BG_COLOR = "#050608" # Near Black
-SURFACE_COLOR = "rgba(16, 18, 27, 0.4)" # Glass Surface
-PRIMARY_COLOR = "#00D1FF" # Cyber Cyan
-ACCENT_COLOR = "#7000FF" # Deep Purple Accent
-ERROR_COLOR = "#FF3333"
-SUCCESS_COLOR = "#00FF94"
-TEXT_HIGH = "#F0F2F5"
-TEXT_MED = "#6B7280"
-OUTLINE_COLOR = "rgba(255, 255, 255, 0.08)"
-GLOW_COLOR = "0 0 30px rgba(0, 209, 255, 0.2)"
+# Modular UI Components
+from ui.styles import (
+    BG_COLOR, TEXT_HIGH, PRIMARY_COLOR, ERROR_COLOR, SUCCESS_COLOR,
+    inject_styles, get_threat_color
+)
+from ui.nice_components.widgets.camera_card import CameraCard
+from ui.nice_components.widgets.intel_panel_item import IntelPanelItem
+from ui.nice_components.views.grid_view import GridView
+from ui.nice_components.views.enrollment_view import EnrollmentView
+from ui.nice_components.views.registry_view import RegistryView
+from ui.nice_components.views.system_view import SystemView
 
-# Global state for background tasks and shared endpoints
+# Setup logging
+logger = logging.getLogger("ryuk")
+
+# Global state
 active_sessions: Dict[str, Processor] = {}
 
 class NiceDashboard:
     def __init__(self, ip_address: str):
         self.ip_address = ip_address
-        self.intel_cards: Dict[str, dict] = {} # aadhar -> metadata
-        self.intel_last_seen: Dict[str, float] = {} # aadhar -> time
-        self.intel_counts: Dict[str, int] = {} # aadhar -> count
-        self.intel_is_active: Dict[str, bool] = {} # aadhar -> is currently in view
-        self.intel_elements: Dict[str, ui.element] = {} # aadhar -> ui row
-        self.intel_count_labels: Dict[str, ui.label] = {} # aadhar -> counter label
+        self.server_port = SERVER_PORT
+        self.intel_cards: Dict[str, dict] = {} 
+        self.intel_last_seen: Dict[str, float] = {} 
+        self.intel_counts: Dict[str, int] = {} 
+        self.intel_is_active: Dict[str, bool] = {} 
+        self.intel_elements: Dict[str, IntelPanelItem] = {} 
+        
         self.redis_healthy = False
         self.mongo_healthy = False
         self.left_panel_visible = True
         self.right_panel_visible = True
-        
-        # Unique ID for this dashboard instance (for processor listeners)
-        import uuid
         self.dashboard_id = str(uuid.uuid4())
         
-        # Setup page
-        self._setup_ui()
-        
-        # Start background timers
-        ui.timer(2.0, self._update_system_stats)
-        ui.timer(2.0, self._check_new_streams)
-        ui.timer(HEALTH_INTERVAL_MS / 1000, self._check_health)
-        ui.timer(1.0, self._update_clock)
-        ui.timer(5.0, self._cleanup_intel)
-        
-        self.camera_cards: Dict[str, ui.card] = {}
+        self.camera_cards: Dict[str, CameraCard] = {}
         self.ui_queue = queue.Queue()
         self.uploaded_image_bytes = None
-        ui.timer(0.05, self._process_ui_queue) # Process UI updates every 50ms
+
+        self._setup_ui()
+        
+        # Start background tasks
+        self.background_tasks = set()
+        ui.timer(2.0, self._update_system_stats)
+        ui.timer(2.0, self._check_new_streams)
+        ui.timer(1.0, self._update_clock)
+        ui.timer(5.0, self._cleanup_intel)
+        ui.timer(0.05, self._process_ui_queue)
+        
+        # Redis subscriber for real-time alerts
+        task = asyncio.create_task(self._subscribe_alerts())
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     def _setup_ui(self):
         ui.query('body').style(f'background-color: {BG_COLOR}; color: {TEXT_HIGH}; font-family: "Outfit", sans-serif; overflow: hidden;')
-        # Advanced Cinematic CSS
-        ui.add_head_html(f"""
-            <style>
-                @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
-                @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-                
-                :root {{
-                    --primary: {PRIMARY_COLOR};
-                    --accent: {ACCENT_COLOR};
-                    --success: {SUCCESS_COLOR};
-                    --bg: {BG_COLOR};
-                    --surface: {SURFACE_COLOR};
-                    --outline: {OUTLINE_COLOR};
-                    --text: {TEXT_HIGH};
-                    --text-muted: {TEXT_MED};
-                }}
+        inject_styles()
 
-                body {{
-                    background: radial-gradient(circle at 50% 0%, #11141d 0%, #050608 100%);
-                }}
-
-                .cyber-panel {{
-                    background: var(--surface) !important;
-                    backdrop-filter: blur(25px) saturate(180%);
-                    border: 1px solid var(--outline) !important;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
-                    border-radius: 16px !important;
-                }}
-                
-                .cyber-border-l {{ border-left: 3px solid var(--primary); }}
-                
-                .glow-text {{
-                    color: var(--text);
-                    text-shadow: 0 0 15px rgba(0, 209, 255, 0.5);
-                }}
-                
-                .scroll-hidden::-webkit-scrollbar {{ display: none; }}
-                
-                .telemetry-bar {{
-                    background: rgba(5, 6, 8, 0.7);
-                    backdrop-filter: blur(10px);
-                    border-bottom: 1px solid var(--outline);
-                }}
-                
-                .nav-icon-btn {{
-                    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-                    color: var(--text-muted) !important;
-                }}
-                .nav-icon-btn:hover {{
-                    color: var(--primary) !important;
-                    background: rgba(0, 209, 255, 0.1) !important;
-                    transform: translateX(5px) scale(1.1);
-                }}
-                .nav-icon-btn.active {{
-                    color: var(--primary) !important;
-                    background: rgba(0, 209, 255, 0.15) !important;
-                    border: 1px solid rgba(0, 209, 255, 0.3) !important;
-                    box-shadow: 0 0 30px rgba(0, 209, 255, 0.3);
-                }}
-                .nav-icon-btn.active i {{ color: var(--primary) !important; }}
-
-                .cam-card {{
-                    position: relative;
-                    overflow: hidden;
-                    border-radius: 20px !important;
-                    border: 1px solid var(--outline) !important;
-                    background: rgba(16, 18, 27, 0.6) !important;
-                    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-                }}
-                .cam-card:hover {{
-                    border-color: var(--primary) !important;
-                    transform: translateY(-8px) scale(1.02);
-                    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 209, 255, 0.2);
-                    z-index: 10;
-                }}
-                
-                .intel-item {{
-                    border-left: 4px solid transparent;
-                    transition: all 0.3s ease;
-                    border-radius: 12px;
-                    background: rgba(255, 255, 255, 0.03);
-                    margin-bottom: 8px;
-                }}
-                .intel-item:hover {{
-                    background: rgba(255, 255, 255, 0.08);
-                    border-left-color: var(--primary);
-                    transform: scale(1.02);
-                }}
-
-                .cyber-btn {{
-                    border-radius: 12px !important;
-                    font-weight: 800 !important;
-                    letter-spacing: 2px !important;
-                    background: linear-gradient(135deg, var(--primary), var(--accent)) !important;
-                    box-shadow: 0 4px 15px rgba(0, 209, 255, 0.3) !important;
-                }}
-                .cyber-btn:hover {{
-                    filter: brightness(1.2);
-                    box-shadow: 0 8px 30px rgba(0, 209, 255, 0.5) !important;
-                }}
-
-                @keyframes pulse-glow {{
-                    0% {{ box-shadow: 0 0 5px rgba(0, 209, 255, 0.2); }}
-                    50% {{ box-shadow: 0 0 20px rgba(0, 209, 255, 0.5); }}
-                    100% {{ box-shadow: 0 0 5px rgba(0, 209, 255, 0.2); }}
-                }}
-
-                .active-ai-track {{
-                    animation: pulse-glow 2s infinite;
-                }}
-
-                .scanline {{
-                    width: 100%;
-                    height: 100px;
-                    z-index: 5;
-                    background: linear-gradient(0deg, rgba(0, 209, 255, 0) 0%, rgba(0, 209, 255, 0.1) 50%, rgba(0, 209, 255, 0) 100%);
-                    opacity: 0.1;
-                    position: absolute;
-                    bottom: 100%;
-                    animation: scanline 8s linear infinite;
-                    pointer-events: none;
-                }}
-
-                @keyframes scanline {{
-                    0% {{ bottom: 100%; }}
-                    100% {{ bottom: -100px; }}
-                }}
-
-                .health-pulse {{
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 50%;
-                    background: {SUCCESS_COLOR};
-                    box-shadow: 0 0 10px {SUCCESS_COLOR};
-                    animation: health-pulse 2s infinite;
-                }}
-
-                .stat-box {{
-                    background: rgba(255,255,255,0.03);
-                    border-radius: 8px;
-                    padding: 8px 12px;
-                    border: 1px solid rgba(255,255,255,0.05);
-                }}
-                .stat-label {{
-                    font-size: 9px;
-                    font-weight: 800;
-                    letter-spacing: 1px;
-                    color: rgba(255,255,255,0.3);
-                    text-transform: uppercase;
-                }}
-                .stat-value {{
-                    font-family: 'JetBrains Mono', 'Roboto Mono', monospace;
-                    font-size: 13px;
-                    font-weight: 900;
-                    color: {PRIMARY_COLOR};
-                }}
-
-                @keyframes health-pulse {{
-                    0% {{ transform: scale(1); opacity: 1; }}
-                    50% {{ transform: scale(1.5); opacity: 0.5; }}
-                    100% {{ transform: scale(1); opacity: 1; }}
-                }}
-            </style>
-        """)
-
-        # --- Base Cinematic Layout ---
-        with ui.row().classes('w-full h-screen no-wrap gap-0 bg-transparent'):
-            
-            # 1. NAVIGATION BAR (Ultra-thin Rail)
-            with ui.column().classes('w-16 h-full items-center py-6 gap-6 border-r border-white/5').style('background: rgba(0,0,0,0.2)'):
-                ui.label("R").classes('font-black text-xl glow-text mb-4').style(f'color: {PRIMARY_COLOR}')
-                self.nav_btns = {}
-                _NAV = [('grid_view', 0, 'Command Grid'), ('person_add', 1, 'Enrollment'), ('analytics', 2, 'Identity Registry'), ('settings', 3, 'Settings')]
-                for icon, idx, label in _NAV:
-                    btn = ui.button(icon=icon, on_click=lambda i=idx: self.switch_view(i)).props('flat round').classes('nav-icon-btn text-gray-400')
-                    with btn:
-                        ui.tooltip(label).classes('bg-black/90 text-blue-300 text-[13px]')
-                    self.nav_btns[idx] = btn
-                self.nav_btns[0].classes('active')
-                
-                ui.space()
-                with ui.column().classes('items-center mb-6 gap-2'):
-                    ui.element('div').classes('health-pulse')
-                    self.health_icon = ui.icon('sensors', color='white').style('font-size: 16px; opacity: 0.4;')
-                
-                
-                # Periodically update system stats
-
-            # 2. ACTIVITY INTELLIGENCE (Left Panel)
-            with ui.column().classes('h-full p-0 cyber-panel border-r border-white/5 transition-all') as self.left_panel:
-                self.left_panel.style(f'width: {320}px')
-                with ui.row().classes('w-full px-6 py-4 items-center justify-between border-b border-white/5'):
-                    ui.label("Tactical intelligence").classes('text-[13px] font-black tracking-[2px] opacity-80')
-                    ui.button(icon='chevron_left', on_click=lambda: self.toggle_left_panel()).props('flat round size=sm').classes('opacity-30')
-                self.log_container = ui.column().classes('w-full grow p-4 gap-3 overflow-y-auto scroll-hidden')
-                # Populate some initial log placeholders
-                with self.log_container:
-                    self._add_log_entry("MONGO", "Database readiness verified", "green")
-                    self._add_log_entry("REDIS", "Cache layer online", "blue")
-
-            # 3. MAIN COMMAND GRID (Central Zone)
-            with ui.column().classes('grow h-full p-0 relative'):
-                # Header Overlay
-                with ui.row().classes('w-full px-12 py-6 items-center justify-between z-10'):
-                    with ui.row().classes('items-center gap-4'):
-                        # Left Toggle (if hidden)
-                        self.left_toggle_btn = ui.button(icon='menu', on_click=lambda: self.toggle_left_panel()).props('flat round size=sm').classes('mr-2')
-                        self.left_toggle_btn.set_visibility(False)
-                        ui.label("RYUK COMMAND CENTER").classes('font-black text-2xl tracking-tighter glow-text uppercase')
-                        ui.badge("STABLE").props('color=green-9 size=sm').classes('text-[9px] px-2 font-black')
+        with ui.row().classes('w-full h-screen no-wrap gap-0 relative'):
+            # MAIN WORKSPACE
+            with ui.column().classes('h-full grow p-0 relative overflow-hidden'):
+                # 1. MODERN TOP NAVIGATION
+                with ui.row().classes('absolute top-6 left-1/2 -translate-x-1/2 modern-nav items-center gap-2 opacity-40 hover:opacity-100 transition-opacity duration-500 hover:duration-200 group'):
+                    # Logo
+                    ui.image('/static/logo.png').classes('w-8 h-8 mr-2 logo-glow cursor-pointer').on('click', lambda: self.switch_view(0))
                     
-                    with ui.row().classes('items-center gap-6'):
-                        self.clock_label = ui.label().classes('font-mono text-[14px] font-black opacity-30')
-                        # Right Toggle + Globe
-                        self.right_toggle_btn = ui.button(icon='analytics', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('opacity-40')
-                        self.right_toggle_btn.set_visibility(False)
-                        ui.icon('public', size='20px', color='white').classes('opacity-40')
+                    self.nav_btns = {}
+                    nav_items = {
+                        0: ("CAMERAS", "grid_view"),
+                        1: ("ENROLL", "person_add"),
+                        2: ("REGISTRY", "badge"),
+                        3: ("CONFIG", "settings"),
+                        4: ("SYSTEM", "dns")
+                    }
+                    
+                    for i, (label, icon) in nav_items.items():
+                        btn = ui.button(label, on_click=lambda i=i: self.switch_view(i)).classes('nav-pill')
+                        btn.props(f'icon={icon} flat color=white')
+                        if i == 0: btn.classes('active')
+                        self.nav_btns[i] = btn
 
-                # Layer 2: Tactical Pod (Refined)
-                with ui.row().classes('w-full px-12 py-8 items-stretch justify-start gap-10 bg-black/10 border-b border-white/5 backdrop-blur-3xl'):
-                    # Pod 1: COMPONENT HEALTH (Resource Matrix)
-                    with ui.card().classes('p-6 bg-white/5 border border-white/10 rounded-2xl gap-6 shadow-2xl flex-row items-center no-wrap'):
-                        with ui.column().classes('gap-0 border-r border-white/10 pr-6 mr-2'):
-                            ui.label("TAC").classes('text-[10px] font-black opacity-20 tracking-[2px]')
-                            ui.label("LOAD").classes('text-[10px] font-black opacity-20 tracking-[2px]')
+                # 2. MAIN VIEW CONTAINER
+                with ui.column().classes('w-full h-full p-4 pt-20'):
+                    with ui.tabs().classes('hidden') as self.tabs:
+                        ui.tab('cameras')
+                        ui.tab('enroll')
+                        ui.tab('registry')
+                        ui.tab('config')
+                        ui.tab('system')
+
+                    with ui.tab_panels(self.tabs, value='cameras').classes('w-full grow bg-transparent').style('height: calc(100vh - 120px)'):
+                        self.grid_view = GridView(self._on_add_camera, self._on_fullscreen, self._on_delete_camera)
+                        # grid_view.create_add_card() call moved to _load_initial_state
+                        self.enroll_view = EnrollmentView(on_upload=self._on_enroll_upload, on_submit=self._on_enroll_submit)
+                        self.registry_view = RegistryView(on_search=self._on_registry_search)
+                        self.registry_view.set_callbacks(
+                            on_logs=self._show_activity_tracking,
+                            on_edit=self._on_registry_edit,
+                            on_delete=self._on_registry_delete_confirm,
+                        )
                         
-                        # CPU Pod
-                        with ui.column().classes('gap-0 items-start w-24'):
-                            ui.label("CPU UTIL").classes('text-[8px] font-black opacity-40 tracking-widest')
-                            self.cpu_label = ui.label("0.0%").classes('text-[20px] font-black text-blue-400 font-mono')
+                        with ui.tab_panel('config').classes('p-12'):
+                            with ui.column().classes('gap-4'):
+                                ui.label("SYSTEM OVERRIDES").classes('text-2xl font-black glow-text mb-4')
+                                with ui.row().classes('gap-8'):
+                                    with ui.column().classes('gap-2'):
+                                        ui.label("AI ENGINE").classes('text-[10px] font-bold opacity-30')
+                                        ui.switch('FACE RECOGNITION', value=True).props('dark')
+                                        ui.switch('THREAT DETECTION', value=True).props('dark')
+                                    with ui.column().classes('gap-2'):
+                                        ui.label("THRESHOLDS").classes('text-[10px] font-bold opacity-30')
+                                        ui.slider(min=0.5, max=0.99, value=0.85, step=0.01).props('dark label-always label-value="{value}"').classes('w-48')
+                                        ui.label("Confidence Floor").classes('text-[10px] opacity-50')
                         
-                        # RAM Pod
-                        with ui.column().classes('gap-0 items-start w-24'):
-                            ui.label("MEM RESI").classes('text-[8px] font-black opacity-40 tracking-widest')
-                            self.mem_label = ui.label("0.0%").classes('text-[20px] font-black text-purple-400 font-mono')
-                            
-                        # GPU Pod
-                        with ui.column().classes('gap-0 items-start w-32'):
-                            ui.label("GPU ACCEL").classes('text-[8px] font-black opacity-40 tracking-widest')
-                            self.gpu_label = ui.label("0% | 0MB").classes('text-[20px] font-black text-green-400 font-mono')
+                        self.system_view = SystemView(SERVER_PORT, self.ip_address)
 
-                    # Global HUD Glow (Visual only)
-                    ui.element('div').classes('absolute -top-20 -left-20 w-80 h-80 bg-blue-500/10 blur-[100px] pointer-events-none rounded-full')
-                    ui.element('div').classes('absolute -bottom-20 -right-20 w-80 h-80 bg-purple-500/10 blur-[100px] pointer-events-none rounded-full')
-                
-                # Dynamic Panels
-                with ui.tab_panels(ui.tabs().set_visibility(False), value=0).classes('w-full grow bg-transparent z-0') as self.panels:
-                    # -- Tab 0: High-Tech Grid --
-                    with ui.tab_panel(0).classes('p-6 bg-transparent'):
-                        self.grid = ui.grid(columns=2).classes('w-full gap-6')
-                        self.empty_container = ui.column().classes('w-full items-center justify-center py-40 gap-4')
-                        with self.empty_container:
-                            ui.icon('radar', size='48px', color='white').classes('animate-pulse opacity-10')
-                            ui.label("Optimizing signal...").classes('font-black tracking-[2px] text-[13px] opacity-20')
-                        self.empty_label = self.empty_container
+            # 3. SIDE PANELS
+            # Intel Panel (Right)
+            with ui.column().classes('h-full w-80 telemetry-bar p-4 gap-4 transition-all duration-500 border-l border-white/10') as self.intel_panel:
+                ui.label("LIVE INTELLIGENCE").classes('text-xs font-black tracking-[3px] text-primary/80 mb-2')
+                self.intel_scroll = ui.scroll_area().classes('grow w-full scroll-hidden')
+                with self.intel_scroll:
+                    self.intel_container = ui.column().classes('w-full gap-2')
 
-                    # -- Tab 1: Enrollment --
-                    with ui.tab_panel(1).classes('p-12 bg-transparent'):
-                        self._build_enrollment_view()
+        # Control panel toggle buttons (absolute positioned)
+        ui.button(on_click=lambda: self.toggle_panel('intel')).props('icon=chevron_right flat').classes('absolute right-2 top-1/2 -translate-y-1/2 opacity-20 hover:opacity-100 z-10')
+        
+        # Trigger initial data load
+        ui.timer(1.0, self._load_initial_state, once=True)
+        # Live system stats refresh (every 3s)
+        ui.timer(3.0, self._update_system_stats)
 
-                    # -- Tab 2: Registry --
-                    with ui.tab_panel(2).classes('p-12 bg-transparent'):
-                        self._build_registry_view()
 
-                    # -- Tab 3: Settings --
-                    with ui.tab_panel(3).classes('p-12 bg-transparent'):
-                        ui.label("Core settings").classes('text-2xl font-black mb-4')
-                        ui.label("Under construction...").classes('opacity-50')
+    def _update_system_stats(self):
+        sv = self.system_view
+        if not sv: return
 
-                # Bottom Dashboard Info
-                with ui.row().classes('w-full px-8 py-3 items-center justify-between telemetry-bar'):
-                    with ui.row().classes('items-center gap-4'):
-                        self.redis_status = ui.label("SRV-REDIS").classes('text-[12px] font-black tracking-widest')
-                        self.mongo_status = ui.label("SRV-MONGO").classes('text-[12px] font-black tracking-widest')
-                        with ui.column().classes('gap-0'):
-                            ui.label("LATENCY").classes('text-[11px] opacity-40')
-                            ui.label("12ms").classes('text-[12px] font-mono text-green-500')
-
-            # 4. TACTICAL RECOGNITION (Right Panel)
-            with ui.column().classes('h-full p-0 cyber-panel border-l border-white/5 transition-all') as self.right_panel:
-                self.right_panel.style(f'width: {320}px')
-                with ui.row().classes('w-full px-6 py-4 items-center justify-between border-b border-white/5'):
-                    ui.label("Recognition feed").classes('text-[13px] font-black tracking-[2px] opacity-50')
-                    ui.button(icon='chevron_right', on_click=lambda: self.toggle_right_panel()).props('flat round size=sm').classes('opacity-30')
-                self.intel_container = ui.column().classes('w-full grow p-4 gap-4 overflow-y-auto scroll-hidden')
-                with self.intel_container:
-                    self.no_intel_label = ui.label("System ready. No targets detected.").classes('w-full text-center py-10 text-[12px] opacity-20 font-bold tracking-widest')
-
-    def toggle_left_panel(self):
-        self.left_panel_visible = not self.left_panel_visible
-        self.left_panel.set_visibility(self.left_panel_visible)
-        self.left_toggle_btn.set_visibility(not self.left_panel_visible)
-
-    def toggle_right_panel(self):
-        self.right_panel_visible = not self.right_panel_visible
-        self.right_panel.set_visibility(self.right_panel_visible)
-        self.right_toggle_btn.set_visibility(not self.right_panel_visible)
-
-    def _add_log_entry(self, source, message, color):
-        with self.log_container:
-            with ui.row().classes('w-full no-wrap gap-4 intel-item p-3'):
-                ui.label(datetime.now().strftime("%H:%M:%S")).classes('text-[10px] font-mono opacity-40 mt-1')
-                with ui.column().classes('gap-0'):
-                    log_color = ERROR_COLOR if color in ['red', 'error'] else "#10B981" if color in ['green', 'success'] else PRIMARY_COLOR if color == 'blue' else TEXT_MED
-                    ui.label(f"[{source.upper()}]").classes('text-[11px] font-black tracking-[1px]').style(f'color: {log_color}')
-                    ui.label(message).classes('text-[13px] font-bold opacity-100 leading-tight')
-
-    def _build_enrollment_view(self):
-        with ui.column().classes('w-full max-w-4xl mx-auto gap-10'):
-            ui.label("Biometric access registration").classes('text-xl font-black tracking-[2px] glow-text')
-            with ui.row().classes('w-full gap-10 items-start'):
-                with ui.card().classes('w-64 h-64 cyber-panel p-0 flex items-center justify-center relative border-outline') as self.photo_card:
-                    self.photo_preview = ui.image('').classes('absolute inset-0 w-full h-full object-cover opacity-80')
-                    ui.icon('fingerprint', size='xl', color='white').classes('opacity-10')
-                    ui.element('div').classes('scanline')
-                    self.upload_ctrl = ui.upload(on_upload=self._handle_upload, label="", auto_upload=True).classes('absolute bottom-0 w-full opacity-10 hover:opacity-100 transition-opacity').props('flat dark')
-                
-                with ui.column().classes('grow gap-6'):
-                    with ui.grid(columns=2).classes('w-full gap-4'):
-                        self.enroll_name = ui.input(label="Subject name").props('dark standout square').classes('w-full')
-                        self.enroll_aadhar = ui.input(label="Identification ID").props('dark standout square').classes('w-full')
-                        self.enroll_phone = ui.input(label="Phone / Communication").props('dark standout square').classes('w-full')
-                        self.enroll_address = ui.input(label="Location data").props('dark standout square').classes('w-full')
-                    
-                    with ui.row().classes('w-full gap-4'):
-                        self.role_select = ui.select(["Personnel", "Visitor", "VIP", "Blacklist"], value="Personnel", label="Classification").props('dark standout square').classes('grow')
-                        self.enroll_threat = ui.select(['Low', 'Medium', 'High'], value='Low', label="Threat profiling").props('dark standout square').classes('grow')
-                    
-                    self.enroll_btn = ui.button("EXECUTE ENROLLMENT", on_click=self._submit_enrollment).classes('w-full h-14 cyber-btn').style(f'background-color: {PRIMARY_COLOR};')
-
-    def _build_registry_view(self):
-        with ui.row().classes('w-full justify-between items-center mb-6'):
-            ui.label("Identity registry").classes('text-2xl font-black tracking-tight glow-text')
-            ui.label("Viewing subjects in high-fidelity neural index").classes('text-[13px] opacity-60 -mt-2')
-            self.ci_count = ui.badge("0 IDENTITIES").props('color=white outline').classes('px-4 py-2 font-black text-[12px]')
-        self.ci_search = ui.input(placeholder="Search identities...", on_change=self._filter_ci).classes('w-full mb-6 cyber-panel p-2 px-4').props('dark borderless')
-        self.ci_list = ui.column().classes('w-full gap-3 overflow-y-auto grow custom-scrollbar')
-
-    def _get_video_frame(self, client_id: str):
-        global active_sessions
-        if client_id in active_sessions:
-            frame = active_sessions[client_id].latest_processed_frame
-            if frame:
-                return Response(content=frame, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
-        return Response(status_code=404)
-
-    # --- Background Logic ---
-    def _check_new_streams(self):
-        active_cids = {cid.decode() if isinstance(cid, bytes) else cid for cid in cache.smembers("registry:active_streams")}
-        db_cids = set()
+        # ── GPU Utilization (NVIDIA) ─────────────────────────────────
         try:
-            # Sync retrieval of all registered cameras
-            sync_db = get_sync_db()
-            if sync_db is not None:
-                for cam in sync_db["cameras"].find({}, {"client_id": 1}):
-                    db_cids.add(cam["client_id"])
-        except Exception as e:
-            print(f"DEBUG: Error pulling db_cids: {e}")
-        
-        if active_cids:
-            print(f"DEBUG: UI Registry Sync — Active CIDs: {active_cids}")
-        
-        # Priority: Show all active streams first, then fill up to 4 with offline DB cameras
-        active_list = sorted([cid for cid in active_cids])
-        offline_list = sorted([cid for cid in db_cids if cid not in active_cids])
-        
-        # New: Add cameras from 'devices' collection (RTSP)
-        rtsp_devices = []
-        try:
-            if sync_db is not None:
-                for dev in sync_db["devices"].find():
-                    rtsp_devices.append(dev)
-        except Exception as e:
-            print(f"DEBUG: Error pulling rtsp_devices: {e}")
-
-        to_show = active_list + offline_list
-        # Logic adjustment: we want to show RTSP devices too
-        rtsp_cids = [dev['ip'] for dev in rtsp_devices]
-        to_show = list(dict.fromkeys(to_show + rtsp_cids)) # Unique list
-        
-        limit = max(4, len(to_show))
-        to_show = to_show[:limit]
-        
-        # Ensure "+" button is always at the end if we have space
-        show_add_btn = True
-        
-        # Remove cards no longer in the restricted list
-        for cid in list(self.camera_cards.keys()):
-            if cid not in to_show:
-                card = self.camera_cards.pop(cid)
-                self.grid.remove(card)
-        
-        # Ensure all required cards exist and are in the correct order
-        for idx, cid in enumerate(to_show):
-            is_active = cid in active_cids or cid in rtsp_cids
-            if cid not in self.camera_cards:
-                self._create_camera_card(cid, is_active)
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             
-            card = self.camera_cards[cid]
-            # Ensure index stability in the grid
-            try:
-                if list(self.grid).index(card) != idx:
-                    card.move(self.grid, idx)
-            except ValueError:
-                pass
+            # Model Name
+            gpu_name = pynvml.nvmlDeviceGetName(handle)
+            if hasattr(sv, 'sys_gpu_name'): sv.sys_gpu_name.set_text(gpu_name)
             
-            # Manage AI sessions back-end (Thread-safe registration)
-            if is_active:
-                source_url = None
-                if cid in rtsp_cids:
-                    dev = next(d for d in rtsp_devices if d['ip'] == cid)
-                    # rtsp://username:password@ip:554/cam/realmonitor?channel=1&subtype=1
-                    source_url = f"rtsp://{dev['username']}:{dev['password']}@{dev['ip']}:554/cam/realmonitor?channel=1&subtype=1"
+            # Usage metrics
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            gpu_util = util.gpu
+            if hasattr(sv, 'sys_gpu_util_pct'): sv.sys_gpu_util_pct.set_text(f'{gpu_util}%')
+            if hasattr(sv, 'sys_gpu_bar'): sv.sys_gpu_bar.set_value(gpu_util / 100)
+            
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            vram_used = mem.used // (1024**2)
+            vram_total = mem.total // (1024**2)
+            vram_pct = vram_used / vram_total if vram_total else 0
+            if hasattr(sv, 'sys_vram_usage'): sv.sys_vram_usage.set_text(f'{vram_used}MB / {vram_total}MB')
+            if hasattr(sv, 'sys_vram_pct_lbl'): sv.sys_vram_pct_lbl.set_text(f'{int(vram_pct*100)}%')
+            if hasattr(sv, 'sys_vram_bar'): sv.sys_vram_bar.set_value(vram_pct)
+            
+            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+            if hasattr(sv, 'sys_gpu_temp'): sv.sys_gpu_temp.set_text(f'{temp}°C')
 
-                if cid not in active_sessions:
-                    self._start_session(cid, source_url)
+            # GPU Processes
+            procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+            if hasattr(sv, 'gpu_process_container'):
+                sv.gpu_process_container.clear()
+                if not procs:
+                    with sv.gpu_process_container:
+                        ui.label("No active GPU processes detected.").classes('text-[13px] opacity-20 italic py-4')
                 else:
-                    # Session already exists, ensure WE are listening to it
-                    proc = active_sessions[cid]
-                    proc.add_listener(self)
-                    if proc.latest_processed_frame:
-                         if not getattr(card, 'is_streaming', False):
-                             self.ui_queue.put(lambda c=cid: self._handle_stream_actual_start(c))
-            elif not is_active and cid in active_sessions:
-                self._stop_session(cid)
-        
-        # Add "+" button card if not present
-        if show_add_btn and "add_btn" not in self.camera_cards:
-            self._create_add_camera_card()
-        elif "add_btn" in self.camera_cards:
-            # Ensure it is at the end
-            self.camera_cards["add_btn"].move(self.grid, len(to_show))
-                
-    def _create_camera_card(self, client_id: str, active: bool):
-        with self.grid:
-            with ui.card().classes('w-full p-0 cyber-panel overflow-hidden cam-card group') as card:
-                card.client_id = client_id
-                with ui.element('div').classes('w-full aspect-video relative bg-black/40 flex items-center justify-center') as container:
-                    card.container = container
-                    card.stream_img = ui.interactive_image().classes('w-full h-full')
-                    card.stream_img.set_visibility(False)
-                    card.placeholder = ui.icon('videocam_off', size='64px', color='white').classes('opacity-10')
-                    ui.element('div').classes('scanline')
-                    
-                    # Fullscreen Button (Tactical Yellow - Top Right)
-                    card.fs_btn = ui.button(icon='fullscreen', on_click=lambda: self._show_fullscreen_view(client_id)) \
-                        .props('flat round size=md') \
-                        .classes('absolute top-3 right-3 transition-all z-50 shadow-lg') \
-                        .style('color: #FFD100 !important;')
-                    
-                    # Overlays
-                    with ui.row().classes('absolute top-3 left-3 items-center gap-2 pointer-events-none'):
-                        card.rec_dot = ui.label("REC").classes('text-[11px] font-black text-red-500 animate-pulse')
-                        # Client ID
-                        card.client_label = ui.label(client_id.upper()).classes('text-[11px] font-black tracking-[2px] opacity-70')
-                        with card.client_label:
-                            ui.tooltip("Loading device info...").classes('bg-black/90 text-blue-300 font-mono text-[12px]')
-                            card.device_tooltip = card.client_label
-                    
-                    # Metadata Overlay (Bottom)
-                    with ui.column().classes('absolute bottom-4 left-4 gap-0 pointer-events-none'):
-                        card.status_label_overlay = ui.label("Signal offline").classes('text-[10px] font-black tracking-widest text-red-500 uppercase')
-                        card.meta_label_overlay = ui.label("Searching...").classes('text-[10px] font-mono opacity-30')
-        
-        self.camera_cards[client_id] = card
-        self.empty_label.set_visibility(False)
-
-    def _show_fullscreen_view(self, client_id: str):
-        """Open a true full-screen cinematic view for the selected stream."""
-        # Use a dialog as the base, but we will trigger browser-level fullscreen on it
-        with ui.dialog().classes('p-0 m-0 w-full h-full max-w-none max-h-none shadow-none border-none') as dialog:
-            # Assign a unique ID so we can target it with JS
-            fs_id = f"fs_container_{client_id.replace('.', '_').replace(':', '_')}"
-            with ui.column().classes('w-full h-full p-0 m-0 bg-black relative flex items-center justify-center overflow-hidden').props(f'id="{fs_id}"') as fs_container:
-                # Live Stream
-                encoded_cid = urllib.parse.quote(client_id)
-                stream_url = f"/stream/{encoded_cid}?t={time.time()}"
-                ui.interactive_image(stream_url).classes('w-full h-full object-contain')
-                
-                # Top Overlay
-                with ui.row().classes('absolute top-0 left-0 w-full p-6 items-center justify-between bg-gradient-to-b from-black/80 to-transparent z-50'):
-                    with ui.column().classes('gap-1'):
-                        ui.label(client_id.upper()).classes('text-sm font-black tracking-[2px] text-white opacity-40')
-                        ui.label("TACTICAL FULL-SCREEN FEED").classes('text-xl font-black text-white glow-text')
-                    
-                    async def close_fs():
-                        await ui.run_javascript('if (document.fullscreenElement) document.exitFullscreen();')
-                        dialog.close()
-
-                    ui.button(icon='close', on_click=close_fs).props('flat round size=lg').classes('text-white hover:bg-white/10 transition-colors')
-
-                # Critical Data Overlay (Bottom Right)
-                with ui.column().classes('absolute top-4 right-4 items-end gap-0'):
-                    ui.label("ENCRYPTED SIGNAL").classes('text-[13px] font-black tracking-widest text-blue-400')
-                    ui.label(datetime.now().strftime("%Y-%m-%d %H:%M:%S")).classes('text-[13px] font-mono text-white')
-
-        dialog.open()
-        # Trigger true browser fullscreen on the specific element
-        # Use a small delay to ensure the dialog is fully attached to the DOM
-        ui.run_javascript(f'''
-            setTimeout(() => {{
-                var el = document.getElementById("{fs_id}");
-                if (el) {{
-                    console.log("Found element for fullscreen:", "{fs_id}");
-                    var requestMethod = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullscreen || el.msRequestFullscreen;
-                    if (requestMethod) {{
-                        requestMethod.call(el).catch(e => {{
-                            console.error("Fullscreen request failed:", e);
-                        }});
-                    }} else {{
-                        console.error("No fullscreen method found on element");
-                    }}
-                }} else {{
-                    console.error("Could not find element with ID:", "{fs_id}");
-                }}
-            }}, 200);
-        ''')
-
-    def _create_add_camera_card(self):
-        with self.grid:
-            with ui.card().classes('w-full aspect-video p-0 cyber-panel overflow-hidden cam-card flex items-center justify-center border-dashed border-2 opacity-50 hover:opacity-100 transition-opacity cursor-pointer') as card:
-                card.on('click', self._show_add_camera_dialog)
-                ui.icon('add', size='64px', color='white').classes('opacity-20')
-                ui.label("Add camera source").classes('font-black tracking-[2px] text-[13px] opacity-20 mt-4')
-                ui.element('div').classes('scanline')
-        self.camera_cards["add_btn"] = card
-
-    def _show_add_camera_dialog(self):
-        with ui.dialog().classes('p-0') as dialog, ui.card().classes('w-[500px] cyber-panel p-8 gap-6'):
-            ui.label("LINK NEW CAMERA NODE").classes('text-lg font-black tracking-widest mb-2 glow-text')
+                    for p in procs:
+                        try:
+                            proc_info = psutil.Process(p.pid)
+                            with ui.row().classes('w-full items-center gap-4 p-2 border-b border-white/5').move(sv.gpu_process_container):
+                                ui.label(str(p.pid)).classes('text-[10px] font-mono opacity-40 w-12')
+                                ui.label(proc_info.name()).classes('text-[12px] font-bold grow')
+                                ui.label(f"{p.usedGpuMemory // (1024**2)} MB").classes('text-[11px] font-mono text-purple-300')
+                        except: continue
             
-            ip_input = ui.input(label="IP ADDRESS").props('dark standout square').classes('w-full')
-            user_input = ui.input(label="USERNAME").props('dark standout square').classes('w-full')
-            pass_input = ui.input(label="PASSWORD").props('dark standout square password').classes('w-full')
-            
-            async def save():
-                if not ip_input.value or not user_input.value or not pass_input.value:
-                    ui.notify("ALL FIELDS ARE MANDATORY", type='warning')
-                    return
-                
-                device_data = {
-                    "ip": ip_input.value,
-                    "username": user_input.value,
-                    "password": pass_input.value,
-                    "added_at": datetime.now()
-                }
-                
+            pynvml.nvmlShutdown()
+        except:
+            if hasattr(sv, 'sys_gpu_name'): sv.sys_gpu_name.set_text("N/A")
+
+        # ── Network & Latency ────────────────────────────────────────
+        try:
+            t1 = time.time()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.3)
                 try:
-                    sync_db = get_sync_db()
-                    if sync_db is not None:
-                        sync_db["devices"].update_one({"ip": ip_input.value}, {"$set": device_data}, upsert=True)
-                        ui.notify("CAMERA SOURCE VERIFIED AND SAVED", color='green')
-                        dialog.close()
-                        self._check_new_streams()
-                except Exception as e:
-                    ui.notify(f"LINKING FAILED: {e}", color='red')
+                    s.connect(("127.0.0.1", self.server_port))
+                    ping = (time.time() - t1) * 1000
+                    if hasattr(sv, 'sys_ping'): sv.sys_ping.set_text(f'{ping:.1f} ms')
+                except: pass
 
-            with ui.row().classes('w-full justify-end gap-3 mt-4'):
-                ui.button("CANCEL", on_click=dialog.close).props('flat dark')
-                ui.button("LINK DEVICE", on_click=save).classes('px-6 h-12 cyber-btn').style(f'background-color: {PRIMARY_COLOR};')
+            net = psutil.net_io_counters()
+            sent_mb = net.bytes_sent / (1024**2)
+            recv_mb = net.bytes_recv / (1024**2)
+            if hasattr(sv, 'sys_net_up'): sv.sys_net_up.set_text(f'{sent_mb:.1f} MB')
+            if hasattr(sv, 'sys_net_down'): sv.sys_net_down.set_text(f'{recv_mb:.1f} MB')
+        except: pass
+
+        # ── WebSocket & Stream Stats ─────────────────────────────────
+        try:
+            cam_count = len(active_sessions)
+            if hasattr(sv, 'ws_active_streams'): sv.ws_active_streams.set_text(str(cam_count))
+            if hasattr(sv, 'ws_subscribers'):
+                total_subs = len(ws_server._alert_clients) if hasattr(ws_server, '_alert_clients') else 0
+                sv.ws_subscribers.set_text(str(total_subs))
+        except: pass
+
+        # ── Service health ───────────────────────────────────────────
+        try:
+            # Check for core processes
+            engine_proc = None
+            sink_proc = None
+            mongo_ok = False
+            redis_ok = False
+            
+            try:
+                db = get_sync_db()
+                if db is not None:
+                    db.command('ping')
+                    mongo_ok = True
+            except Exception as e:
+                # Still log but it should work now
+                pass
+
+            try:
+                cache.ping()
+                redis_ok = True
+            except: pass
+
+            # Global Metrics
+            total_procs = 0
+            total_threads = 0
+            for p in psutil.process_iter(['cmdline', 'num_threads']):
+                try:
+                    total_procs += 1
+                    total_threads += p.info.get('num_threads', 0)
+                    cmd = p.info.get('cmdline')
+                    if cmd:
+                        if any('services/unified_engine.py' in arg for arg in cmd): engine_proc = p
+                        if any('services/sink.py' in arg for arg in cmd): sink_proc = p
+                except: continue
+
+            from ui.styles import SUCCESS_COLOR, ERROR_COLOR
+            # Update Global counts
+            if hasattr(sv, 'sys_total_procs'): sv.sys_total_procs.set_text(str(total_procs))
+            if hasattr(sv, 'sys_total_threads'): sv.sys_total_threads.set_text(str(total_threads))
+            try:
+                lavg = os.getloadavg()
+                if hasattr(sv, 'sys_load_avg'): sv.sys_load_avg.set_text(f"{lavg[0]:.2f}, {lavg[1]:.2f}, {lavg[2]:.2f}")
+            except: pass
+
+            # Update AI Engine Status
+            if hasattr(sv, 'svc_engine_status'):
+                status = "ONLINE" if engine_proc else "OFFLINE"
+                sv.svc_engine_status.set_text(status)
+                sv.svc_engine_status.style(f"color: {SUCCESS_COLOR if status == 'ONLINE' else ERROR_COLOR}")
+                if engine_proc:
+                    try:
+                        cpu = engine_proc.cpu_percent()
+                        mem = engine_proc.memory_info().rss / (1024 * 1024)
+                        sv.svc_engine_metrics.set_text(f"{cpu:.1f}% CPU • {mem:.0f}MB")
+                    except: pass
+
+            # Update Sink Status
+            if hasattr(sv, 'svc_sink_status'):
+                status = "ONLINE" if sink_proc else "OFFLINE"
+                if sink_proc and not mongo_ok: status = "DEGRADED"
+                sv.svc_sink_status.set_text(status)
+                sv.svc_sink_status.style(f"color: {SUCCESS_COLOR if status == 'ONLINE' else ('#f59e0b' if status == 'DEGRADED' else ERROR_COLOR)}")
+                if sink_proc:
+                    try:
+                        cpu = sink_proc.cpu_percent()
+                        mem = sink_proc.memory_info().rss / (1024 * 1024)
+                        sv.svc_sink_metrics.set_text(f"{cpu:.1f}% CPU • {mem:.0f}MB")
+                    except: pass
+
+            # Database Icons
+            if hasattr(sv, 'db_mongo_status'):
+                sv.db_mongo_status.props(f"color={'green' if mongo_ok else 'red'}")
+            if hasattr(sv, 'db_redis_status'):
+                sv.db_redis_status.props(f"color={'green' if redis_ok else 'red'}")
+
+        except Exception as e:
+            print(f"DEBUG: Health Polling Error: {e}")
+        
+        # ── Camera Cards Status ──────────────────────────────────────
+        try:
+            for cid, card in self.camera_cards.items():
+                is_active = cid in active_sessions
+                card.update_stream(is_active)
+        except: pass
+
+
+    def switch_view(self, idx: int):
+
+        views = {0: 'cameras', 1: 'enroll', 2: 'registry', 3: 'config', 4: 'system'}
+        self.tabs.value = views[idx]
+        for i, btn in self.nav_btns.items():
+            if i == idx: btn.classes('active')
+            else: btn.classes(remove='active')
+
+    def toggle_panel(self, panel_type: str):
+        if panel_type == 'intel':
+            self.right_panel_visible = not self.right_panel_visible
+            self.intel_panel.set_visibility(self.right_panel_visible)
+
+
+    async def _check_new_streams(self):
+        while new_stream_signals:
+            cid = new_stream_signals.popleft()
+            if cid not in active_sessions:
+                print(f"DEBUG: Starting session for {cid}")
+                proc = Processor(cid)
+                active_sessions[cid] = proc
+                proc.start()
+                
+                # Update UI
+                self.ui_queue.put(lambda c=cid: self._add_camera_to_ui(c))
+
+    def _load_initial_state(self):
+        """Fetch existing cameras and profiles from DB."""
+        # 1. Load Cameras
+        # 1. Load Cameras
+        try:
+            db = get_sync_db()
+            if db is not None:
+                cameras = list(db.cameras.find({}))
+                for cam in cameras:
+                    cid = cam.get('client_id')
+                    url = cam.get('source')
+                    if cid:
+                        self.ui_queue.put(lambda c=cid, u=url: self._add_camera_to_ui(c, u))
+        except Exception as e:
+            print(f"DEBUG: Error loading cameras: {e}")
+
+        # 2. Load Profiles
+        self._refresh_registry()
+        
+        # 3. Finally add the "Add Camera" button (at the end)
+        self.ui_queue.put(lambda: self.grid_view.create_add_card())
+
+    def _refresh_registry(self):
+        """Reload the identity registry view."""
+        try:
+            profiles = get_all_profiles()
+            # Queue all UI updates to ensure they run in the correct NiceGUI context
+            def _do_refresh():
+                try:
+                    self.registry_view.clear()
+                    for profile in profiles:
+                        self.registry_view.add_profile(profile)
+                except Exception as e:
+                    print(f"DEBUG: Registry render error: {e}")
+            self.ui_queue.put(_do_refresh)
+        except Exception as e:
+            print(f"DEBUG: Error refreshing registry: {e}")
+
+
+    def _on_registry_search(self, e):
+        """Filter the registry view based on search query."""
+        query = e.value.lower()
+        try:
+            db = get_sync_db()
+            if db is not None:
+                # Search by name, aadhar, phone, or address
+                filter_obj = {
+                    "$or": [
+                        {"name": {"$regex": query, "$options": "i"}},
+                        {"aadhar": {"$regex": query, "$options": "i"}},
+                        {"phone": {"$regex": query, "$options": "i"}},
+                        {"address": {"$regex": query, "$options": "i"}}
+                    ]
+                }
+                profiles = list(db.profiles.find(filter_obj))
+                self.registry_view.clear()
+                for profile in profiles:
+                    self.registry_view.add_profile(profile)
+        except Exception as e:
+            ui.notify(f"Search failed: {e}", type='negative')
+
+    def _add_camera_to_ui(self, client_id, url=None):
+        if client_id not in self.camera_cards:
+            # Persistent check for saved source if not provided
+            if not url:
+                try:
+                    db = get_sync_db()
+                    if db is not None:
+                        cam = db.cameras.find_one({"client_id": client_id})
+                        if cam: url = cam.get('source')
+                except: pass
+
+            # Enable session if url is available
+            if url and client_id not in active_sessions:
+                from components.processor import Processor
+                proc = Processor(client_id, source_url=url)
+                active_sessions[client_id] = proc
+                proc.add_listener(self)
+                proc.start()
+                logger.info(f"UI: Initialized session for {client_id} -> {url}")
+
+            card = self.grid_view.add_camera(client_id)
+            self.camera_cards[client_id] = card
+            card.update_stream(True)
+
+
+    def _update_clock(self):
+        # Could update a clock element if one existed in modern-nav
+        pass
+
+    async def _cleanup_intel(self):
+        now = time.time()
+        to_remove = []
+        for aadhar, last_seen in self.intel_last_seen.items():
+            if now - last_seen > INTEL_CLEANUP_S:
+                to_remove.append(aadhar)
+        
+        for aadhar in to_remove:
+            if aadhar in self.intel_elements:
+                self.intel_elements[aadhar].delete()
+                del self.intel_elements[aadhar]
+            if aadhar in self.intel_last_seen: del self.intel_last_seen[aadhar]
+            if aadhar in self.intel_counts: del self.intel_counts[aadhar]
+            if aadhar in self.intel_is_active: del self.intel_is_active[aadhar]
+
+    async def _subscribe_alerts(self):
+        try:
+            pubsub = cache.pubsub()
+            pubsub.subscribe('security_alerts')
+            while not app.is_stopping:
+                msg = await asyncio.to_thread(pubsub.get_message, ignore_subscribe_messages=True, timeout=1.0)
+                if msg:
+                    data = json.loads(msg['data'])
+                    self.ui_queue.put(lambda d=data: self._update_intel(d))
+                await asyncio.sleep(0.01)
+        except Exception as e:
+            print(f"DEBUG: Alert subscriber error: {e}")
+
+    def _update_intel(self, metadata: dict):
+        aadhar = metadata.get('aadhar')
+        if not aadhar: return
+        
+        camera = metadata.get('source', '')
+        now = time.time()
+        
+        # === COOLDOWN: only increment counter max once every 3 seconds per person ===
+        last_update = self.intel_last_seen.get(aadhar, 0)
+        if aadhar in self.intel_elements and (now - last_update) < 3.0:
+            return  # Suppress rapid-fire duplicates; card already exists and was updated recently
+        
+        # Deduplication and counters - keyed by aadhar so each person shows only once
+        self.intel_last_seen[aadhar] = now
+        self.intel_counts[aadhar] = self.intel_counts.get(aadhar, 0) + 1
+        self.intel_is_active[aadhar] = True
+        
+        if aadhar not in self.intel_elements:
+            with self.intel_container:
+                item = IntelPanelItem(metadata).on('click', lambda a=aadhar: self._show_activity_tracking(a))
+                self.intel_elements[aadhar] = item
+        else:
+            # Update the existing card instead of adding a new one
+            self.intel_elements[aadhar].update_count(self.intel_counts[aadhar], camera)
+
+    def _show_activity_tracking(self, aadhar: str):
+        profile = get_profile(aadhar) or {}
+        subject_name = profile.get('name', aadhar).title()
+        logs = get_activity_report(aadhar, limit=30)
+
+        with ui.dialog().classes('overflow-hidden') as dialog, ui.card().classes('p-0 cyber-panel min-w-[500px] h-[700px] flex-nowrap overflow-hidden'):
+            with ui.column().classes('w-full h-full gap-0'):
+                # Header
+                with ui.row().classes('w-full px-6 py-5 items-center justify-between border-b border-white/10 bg-white/5'):
+                    with ui.column().classes('gap-0'):
+                        ui.label('SURVEILLANCE HISTORY').classes('text-[10px] font-black tracking-[4px] text-primary/60')
+                        ui.label(f"{subject_name.upper()}").classes('text-xl font-black text-white')
+                    ui.button(icon='close', on_click=dialog.close).props('flat round color=white/30')
+
+                # Timeline Content
+                with ui.scroll_area().classes('grow w-full p-8 scroll-hidden'):
+                    if not logs:
+                        with ui.column().classes('absolute-center items-center py-20 gap-4 opacity-20'):
+                            ui.icon('history', size='64px')
+                            ui.label('No movements recorded in the current epoch.').classes('text-xs font-black tracking-[2px]')
+                    else:
+                        with ui.column().classes('w-full gap-0 relative'):
+                            # The Vertical Spine
+                            ui.element('div').classes('absolute left-[33px] top-4 bottom-4 w-px bg-white/10')
+                            
+                            for i, log in enumerate(logs):
+                                ts = log.get('timestamp', '')
+                                ts_str = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+                                time_val = ts_str[11:16] if len(ts_str) > 15 else ts_str
+                                date_val = ts_str[:10] if len(ts_str) > 9 else ''
+                                
+                                # Use simple names for cameras
+                                camera_id = log.get('client_id', 'Unknown Device')
+                                camera_name = camera_id.replace('_', ' ').replace('-', ' ').title()
+                                
+                                with ui.row().classes('w-full no-wrap mb-8 items-start'):
+                                    # Left side: Timestamp
+                                    ui.label(time_val).classes('w-8 text-[11px] font-mono text-white/40 mt-1 shrink-0 text-right mr-4')
+                                    
+                                    # Middle: Indicator Node
+                                    with ui.element('div').classes('relative w-[15px] shrink-0 mt-[6px]'):
+                                        if i == 0:
+                                            # Pulsating node for latest event
+                                            ui.element('div').classes('absolute -inset-1 rounded-full bg-primary/40 animate-pulse')
+                                            ui.element('div').classes('relative w-3.5 h-3.5 rounded-full bg-primary border-2 border-black')
+                                        else:
+                                            ui.element('div').classes('relative w-3.5 h-3.5 rounded-full bg-white/10 border-2 border-black')
+                                    
+                                    # Right side: Detail
+                                    with ui.column().classes('pl-4 gap-1'):
+                                        # Phrasing requested: "Name was at cameraname at time"
+                                        text = f"{subject_name} was detected at"
+                                        with ui.row().classes('items-center gap-1'):
+                                            ui.label(text).classes('text-[12px] opacity-60 font-medium')
+                                            ui.label(camera_name).classes('text-[13px] font-black text-white px-2 py-0.5 bg-white/5 rounded-sm')
+                                        
+                                        with ui.row().classes('items-center gap-2 opacity-30 mt-0.5'):
+                                            ui.icon('calendar_today', size='10px')
+                                            ui.label(date_val).classes('text-[10px] font-mono')
+                                            if log.get('confidence'):
+                                                ui.label(f"· ID Conf: {log['confidence']*100:.0f}%").classes('text-[10px] font-mono')
+
         dialog.open()
 
-    def _start_session(self, client_id: str, source_url: Optional[str] = None):
-        global active_sessions
-        if client_id in active_sessions: return
+
+    async def _generate_intel_dossier(self, aadhar: str, container: ui.markdown):
+        container.set_content("Initializing core reasoning models...")
+        profile = get_profile(aadhar) or {"name": "Unknown", "aadhar": aadhar}
+        logs = get_activity_report(aadhar, limit=100)
         
-        print(f"DEBUG: Dashboard — Starting Session for CID: {client_id}")
-        proc = Processor(client_id, source_url=source_url)
-        # Register ourselves as a listener
-        proc.add_listener(self)
-        proc.start()
-        active_sessions[client_id] = proc
-        print(f"DEBUG: Dashboard — Session registry updated. Total active: {len(active_sessions)}")
+        full_text = ""
+        async for chunk in asyncio.to_thread(lambda: ryuk_agent.generate_dossier_stream(profile, logs, "LAST 24 HOURS")):
+            # Note: generate_dossier_stream is a generator, we wrap it in to_thread if it's blocking
+            # But wait, it's a generator. NiceGUI handles async loops.
+            # However, RyukAgent.generate_dossier_stream is synchronous generator (yield).
+            # I should iterate in thread or make it async.
+            pass
         
-    # --- Multi-Listener Processor Callbacks (called from Processor threads) ---
-    def on_detection(self, meta):
-        self.ui_queue.put(lambda: self._handle_detection(meta))
-
-    async def _handle_stream_start(self, e):
-        # We'll simulate a start and trigger the actual start call
-        client_id = e.args['client_id']
-        self._add_log_entry("WATCHDOG", f"Initializing stream index for device: {client_id}", "blue")
-        # In a real app, you'd wait for connection confirmation
-        await self._handle_stream_actual_start(client_id)
-
-    def on_stream_start(self, client_id):
-        print(f"DEBUG: UI Listener — Received stream_start for {client_id}")
-        self.ui_queue.put(lambda: self._handle_stream_actual_start(client_id))
-
-    def on_inactive(self, client_id):
-        self.ui_queue.put(lambda: self._stop_session(client_id))
+        # Let's fix the iteration for synchronous generator in async context
+        def iterate():
+            nonlocal full_text
+            for chunk in ryuk_agent.generate_dossier_stream(profile, logs, "LAST 24 HOURS"):
+                full_text += chunk
+                container.set_content(full_text)
+        
+        await asyncio.to_thread(iterate)
 
     def _process_ui_queue(self):
-        """Processes pending UI tasks from the thread-safe queue on the main thread."""
         while not self.ui_queue.empty():
             try:
                 callback = self.ui_queue.get_nowait()
                 callback()
-            except Exception as e:
-                self._add_log_entry("SYSTEM", f"UI logic error: {str(e)}", "red")
+            except: break
 
-    def _handle_stream_actual_start(self, client_id):
-        # Trigger the actual stream start in the backend
-        try:
-            self._add_log_entry("IMAGE", f"Processing pipeline activated for {client_id}", "green")
-            # For now, we rely on the processor logic already running or triggered by the backend
-            self._add_log_entry("WATCHDOG", f"Stream index synchronized for {client_id}", "green")
-        except Exception as e:
-            self._add_log_entry("WATCHDOG", f"Pipeline error for {client_id}: {str(e)}", "red")
-            return
-
-        print(f"DEBUG: UI — Handling stream actual start for {client_id}")
-        # Safety check: if card is no longer in camera_cards (e.g., removed during transition)
-        if client_id not in self.camera_cards:
-            print(f"DEBUG: UI — ABORT start: card missing for {client_id}")
-            return
-
-        # This runs when the first frame is RECEIVED by the processor
-        if client_id in self.camera_cards:
-            card = self.camera_cards[client_id]
-            if not card.stream_img: return
-            
-            if getattr(card, 'is_streaming', False):
-                return
-            
-            # Use URL-encoded client_id to handle colons properly
-            encoded_cid = urllib.parse.quote(client_id)
-            # Use set_source for the interactive_image
-            card.stream_img.set_source(f"/stream/{encoded_cid}?t={time.time()}")
-            card.stream_img.set_visibility(True)
-            card.placeholder.set_visibility(False)
-            card.rec_dot.set_visibility(True)
-            card.is_streaming = True
-            
-            # Fetch device info to update UI
-            dev_name = "Signal active"
-            tactical_loc = "Off-site"
-            
-            from core.database import get_sync_db
-            db = get_sync_db()
-            if db is not None:
-                # Try cameras collection first, then devices
-                cam = db["cameras"].find_one({"client_id": client_id})
-                if not cam:
-                    cam = db["devices"].find_one({"ip": client_id})
-                
-                if cam:
-                    if "device_info" in cam:
-                        di = cam.get("device_info", {})
-                        dev_name = di.get('device_display_name') or di.get('device_name', 'Unnamed Node')
-                        info_str = f"NAME: {dev_name}\nOS: {di.get('platform', 'Unknown')}\nAGENT: {di.get('user_agent','Unknown')[:50]}..."
-                        
-                        card.device_tooltip.set_text(f"{dev_name} // {di.get('platform', 'Unk')}")
-                        with card.device_tooltip:
-                            ui.tooltip(info_str).classes('bg-black/95 text-blue-300 font-mono text-[9px] whitespace-pre')
-                    else:
-                        # RTSP Device fallback
-                        dev_name = f"Cam-{client_id}"
-                        card.device_tooltip.set_text(f"{dev_name} // RTSP")
-                        with card.device_tooltip:
-                             ui.tooltip(f"RTSP source: {client_id}").classes('bg-black/95 text-blue-300 font-mono text-[9px]')
-
-                    loc_list = cam.get("locations", [])
-                    tactical_loc = loc_list[0] if loc_list else "RTSP SOURCE"
-
-            # Update Overlay Labels
-            
-            # Update Overlay Labels
-            card.status_label_overlay.set_text(dev_name)
-            card.status_label_overlay.classes(replace='text-red-500 text-orange-500', add='text-green-500')
-            card.meta_label_overlay.set_text(tactical_loc)
-            card.meta_label_overlay.classes(replace='opacity-30', add='opacity-100')
-            
-            # Update Client ID color (Green when online)
-            card.client_label.classes(replace='opacity-70', add='text-green-500 opacity-100')
-        
-        self._add_log_entry("SIGNAL", f"STREAM LIVE: {client_id}", "green")
-
-    async def _handle_signal_drop(self, client_id: str):
-        # We wrap this in an async function so it can be scheduled on the main loop
-        if client_id in active_sessions:
-            self._stop_session(client_id)
-
-    def _stop_session(self, client_id: str):
-        global active_sessions
-        print(f"NiceGUI: Stopping session {client_id}")
-        # Instead of stopping the global processor immediately, we just stop listening.
-        # The last dashboard instance to disconnect (or the processor's own timeout) will stop it.
-        proc = active_sessions.get(client_id)
-        if proc:
-            proc.remove_listener(self)
-            if not proc.listeners:
-                 active_sessions.pop(client_id)
-                 proc.stop()
-        
-        # UI Updates (Always run for this dashboard instance)
-        if client_id in self.camera_cards:
-            card = self.camera_cards[client_id]
-            card.is_streaming = False
-            card.stream_img.set_source('')
-            card.stream_img.set_visibility(False)
-            card.placeholder.set_visibility(True)
-            card.rec_dot.set_visibility(False)
-            card.rec_dot.set_visibility(False)
-            
-            # Update Overlay Labels
-            card.status_label_overlay.set_text("Signal offline")
-            card.status_label_overlay.classes(replace='text-green-500 text-orange-500', add='text-red-500')
-            card.meta_label_overlay.set_text("NO SIGNAL")
-            card.meta_label_overlay.classes(replace='opacity-100', add='opacity-30')
-            
-            # Update Client ID color (Gray when offline)
-            card.client_label.classes(replace='text-green-500 opacity-100', add='opacity-70')
-        
-        self._add_log_entry("SIGNAL", f"CONNECTION LOST: {client_id}", "red")
-
-    def _handle_detection(self, data):
-        # Data format: {'client_id': str, 'detections': [{...}]}
+    def on_detection(self, data: dict):
+        """Callback from Processor when faces are identified."""
         client_id = data.get('client_id')
         detections = data.get('detections', [])
         
+        # 1. Update camera card overlay text
+        if client_id in self.camera_cards and detections:
+            names = [d.get('name', 'Unknown') for d in detections if d.get('name') != 'Unknown']
+            if names:
+                text = f"DET: {', '.join(names)}"
+                self.ui_queue.put(lambda c=self.camera_cards[client_id], t=text: c.update_metadata(t))
         
-        for metadata in detections:
-            aadhar = metadata.get("aadhar")
-            if not aadhar: continue
-            self.intel_last_seen[aadhar] = time.time()
-            
-            if aadhar not in self.intel_cards:
-                self.intel_counts[aadhar] = 1
-                self.intel_is_active[aadhar] = True
-                self.intel_cards[aadhar] = metadata
-                with self.intel_container:
-                    self.no_intel_label.set_visibility(False)
-                    threat = metadata.get('threat_level', 'Low')
-                    threat_color = 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'
-                    with ui.row().classes('w-full no-wrap gap-4 intel-item p-3 border-r border-white/5 shadow-xl animate-fade').style('background: rgba(255,255,255,0.02)') as card:
-                        self.intel_elements[aadhar] = card
-                        ui.avatar('person', color='transparent').classes('border border-white/10').style(f'background-color: {SURFACE_COLOR}; color: white')
-                        with ui.column().classes('gap-0 grow'):
-                            ui.label(metadata.get('name', 'Unknown')).classes('font-black text-xs')
-                            ui.label(aadhar).classes('text-[11px] font-mono opacity-40')
-                            with ui.row().classes('items-center gap-2 mt-2'):
-                                ui.badge(threat.upper()).props(f'color={threat_color} size=xs').classes('text-[10px] px-2')
-                        
-                        with ui.column().classes('items-end gap-1'):
-                            self.intel_count_labels[aadhar] = ui.label("×1").classes('text-[13px] font-black text-orange-500 opacity-80')
-                            ui.label("MATCH 98%").classes('text-[10px] font-bold opacity-20')
-                    
-                    if len(list(self.intel_container)) > 1:
-                        card.move(self.intel_container, target_index=0)
-                
-                self._add_log_entry("RECOGNITION", f"Target identified: {metadata.get('name')}", "orange")
-            else:
-                # If the person was previously inactive (left camera and came back), increment count
-                if not self.intel_is_active.get(aadhar, False):
-                    self.intel_counts[aadhar] += 1
-                    self.intel_is_active[aadhar] = True # Mark as back in view
-                    if aadhar in self.intel_count_labels:
-                        self.intel_count_labels[aadhar].set_text(f"×{self.intel_counts[aadhar]}")
-                
-                # Move to top to indicate recent activity
-                if aadhar in self.intel_elements:
-                    try:
-                        self.intel_elements[aadhar].move(self.intel_container, target_index=0)
-                    except Exception as e:
-                        print(f"DEBUG: UI — Failed to reorder intel card: {e}")
+        # 2. Push each identified person to the LIVE INTELLIGENCE panel
+        for det in detections:
+            if det and det.get('aadhar') and det.get('name', 'Unknown') != 'Unknown':
+                # Enrich with source camera
+                enriched = {**det, 'source': client_id}
+                self.ui_queue.put(lambda d=enriched: self._update_intel(d))
 
-    async def _check_health(self):
-        # Check backend services
-        try:
-            # MongoDB Health
-            db = get_sync_db()
-            mongo_up = db is not None
-            if mongo_up != self.mongo_healthy:
-                self.mongo_healthy = mongo_up
-                status = "ONLINE" if mongo_up else "OFFLINE"
-                color = "green" if mongo_up else "red"
-                self._add_log_entry("MONGO", f"Database connectivity: {status}", color)
-            
-            self.mongo_status.style(f'color: {"#10B981" if mongo_up else ERROR_COLOR}')
-            
-            # Redis Health
-            try:
-                cache.ping()
-                redis_up = True
-            except:
-                redis_up = False
 
-            if redis_up != self.redis_healthy:
-                self.redis_healthy = redis_up
-                status = "ONLINE" if redis_up else "OFFLINE"
-                color = "green" if redis_up else "red"
-                self._add_log_entry("REDIS", f"Cache layer connectivity: {status}", color)
-            self.redis_status.style(f'color: {"#10B981" if redis_up else ERROR_COLOR}')
+    def on_stream_start(self, client_id: str):
+        if client_id in self.camera_cards:
+            self.ui_queue.put(lambda: self.camera_cards[client_id].update_stream(True))
+
+    def on_inactive(self, client_id: str):
+        if client_id in self.camera_cards:
+            self.ui_queue.put(lambda: self.camera_cards[client_id].update_stream(False))
+
+    def _on_add_camera(self):
+        with ui.dialog().classes('w-full') as dialog, ui.card().classes('w-full max-w-2xl p-8 cyber-panel relative overflow-hidden'):
+            ui.element('div').classes('scanline opacity-10')
+            ui.label('LINK NEW SENSOR').classes('text-sm font-black tracking-[6px] text-primary/90 mb-2')
             
-            self.health_icon.style(f'color: {"#10B981" if mongo_up and redis_up else ERROR_COLOR}')
-        except Exception as e:
-            self._add_log_entry("SYSTEM", f"Health monitoring error: {str(e)}", "red")
-            self.mongo_status.style(f'color: {ERROR_COLOR}')
-            self.redis_status.style(f'color: {ERROR_COLOR}')
+            # Auto-populated state based on selection
+            self.selected_node_info = {"ip": None, "port": None}
 
-    def _cleanup_intel(self):
-        now = time.time()
-        # Mark as INACTIVE if not seen for 2 seconds (subject probably left camera)
-        for aadhar, last_t in list(self.intel_last_seen.items()):
-            if now - last_t > 2.0:
-                self.intel_is_active[aadhar] = False
-
-        stale = [a for a, t in self.intel_last_seen.items() if now - t > INTEL_CLEANUP_S]
-        for aadhar in stale:
-            self.intel_last_seen.pop(aadhar)
-            self.intel_cards.pop(aadhar)
-            self.intel_counts.pop(aadhar, None)
-            self.intel_is_active.pop(aadhar, None)
-            self.intel_count_labels.pop(aadhar, None)
-            el = self.intel_elements.pop(aadhar, None)
-            if el:
+            async def run_discovery():
+                status.set_text('SCANNING NETWORK...')
+                status.classes(add='animate-pulse')
                 try:
-                    self.intel_container.remove(el)
-                except:
-                    pass
-        
-        if not self.intel_cards and not any(isinstance(child, ui.row) for child in self.intel_container):
-            self.no_intel_label.set_visibility(True)
-
-    # --- UI Events ---
-    def switch_view(self, index: int):
-        self.panels.set_value(index)
-        for i, btn in self.nav_btns.items():
-            if i == index:
-                btn.classes('active')
-            else:
-                btn.classes(remove='active')
-        
-        if index == 2:
-            self._load_ci()
-        
-        self._add_log_entry("SYSTEM", f"SWITCHED TO VIEW_MODE_{index}", "blue")
-
-    def _update_clock(self):
-        self.clock_label.set_text(datetime.now().strftime("%H:%M:%S  IST"))
-
-    # --- Enrollment ---
-    async def _handle_upload(self, e):
-        """Ultra-resilient async upload handler for biometric data."""
-        try:
-            print(f"BIO-LOG: Processing upload event from subject...")
-            
-            # 1. Try standard NiceGUI 3.x+ e.file.read()
-            data = None
-            if hasattr(e, 'file'):
-                data = await e.file.read()
-            
-            # 2. Fallback for older versions or variants (e.content)
-            if data is None:
-                content = getattr(e, 'content', None)
-                if content:
-                    if hasattr(content, 'read'):
-                        if asyncio.iscoroutinefunction(content.read):
-                            data = await content.read()
-                        else:
-                            data = content.read()
-                    else:
-                        data = content
-            
-            # 3. Last resort fallback
-            if data is None:
-                data = getattr(e, 'args', {}).get('content')
-
-            if data:
-                self.uploaded_image_bytes = data
-                print(f"BIO-LOG: Captured {len(data)} bytes of neural data.")
-                
-                # Update UI preview using base64
-                b64 = base64.b64encode(data).decode('utf-8')
-                self.photo_preview.set_source(f'data:image/jpeg;base64,{b64}')
-                
-                # Visual success indicator
-                self.photo_card.style('border: 2px solid #53ff53; box-shadow: 0 0 20px rgba(83, 255, 83, 0.4);')
-                ui.notify("BIOMETRIC DATA CAPTURED", color='green', position='top')
-            else:
-                print("BIO-LOG ERROR: Upload event received but content was empty.")
-                ui.notify("UPLOAD FAILED: NO CONTENT", color='red')
-        except Exception as err:
-            print(f"BIO-LOG CRITICAL ERROR: {err}")
-            ui.notify(f"SYSTEM UPLOAD ERROR: {err}", color='red')
-
-    async def _submit_enrollment(self):
-        name = self.enroll_name.value
-        aadhar = self.enroll_aadhar.value
-        threat = self.enroll_threat.value
-        phone = self.enroll_phone.value
-        address = self.enroll_address.value
-        
-        if not name:
-            ui.notify("MISSING SUBJECT NAME", type='warning', position='top')
-            return
-        if not aadhar:
-            ui.notify("MISSING IDENTIFICATION ID", type='warning', position='top')
-            return
-        if self.uploaded_image_bytes is None:
-            ui.notify("ACTION REQUIRED: SELECT SUBJECT PHOTO FIRST", type='negative', position='top')
-            # Trigger a visual pulse if photo missing
-            self.photo_card.classes(add='animate-pulse')
-            ui.timer(2.0, lambda: self.photo_card.classes(remove='animate-pulse'), once=True)
-            return
-        
-        self.enroll_btn.set_text("ENROLLING NEURAL DATA...")
-        self.enroll_btn.disable()
-        
-        try:
-            # Save bytes to a temp file because watchdog.enroll_face expects a path
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
-                f.write(self.uploaded_image_bytes)
-                temp_path = f.name
-            
-            from core.watchdog_indexer import enroll_face
-            
-            self._add_log_entry("MONGO", "Committing biometric data to persistent store...", "blue")
-            
-            # Use the actual enroll_face function which handles both disk and DB
-            await asyncio.to_thread(
-                enroll_face,
-                temp_path, aadhar, name, threat, phone, address
-            )
-            
-            self._add_log_entry("MONGO", f"Identity committed: {name}", "green")
-            ui.notify("Subject successfully enrolled", type='positive')
-
-            # Cleanup temp file (if enroll_face was used, otherwise not strictly needed)
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                
-            # --- Clear Enrollment Screen ---
-            self.enroll_name.value = ""
-            self.enroll_aadhar.value = ""
-            self.enroll_phone.value = ""
-            self.enroll_address.value = ""
-            self.enroll_threat.value = "Low"
-            
-            # Reset Biometric Buffer
-            self.uploaded_image_bytes = None
-            self.photo_preview.set_source('')
-            self.photo_card.style('border: 1px solid rgba(255,255,255,0.1); box-shadow: none;')
-            
-            # Reset Upload control if possible (re-create or clear)
-            self.upload_ctrl.reset()
-            
-        except Exception as e:
-            print(f"ENROLL-ERROR: {e}")
-            ui.notify(f"Enrollment Error: {str(e)}", type='negative')
-        finally:
-            self.enroll_btn.set_text("EXECUTE ENROLLMENT")
-            self.enroll_btn.enable()
-
-    # --- CI View ---
-    def _load_ci(self):
-        query = self.ci_search.value.lower() if hasattr(self, 'ci_search') else ""
-        profiles = get_all_profiles()
-        
-        # Performance: filter profiles list first
-        if query:
-            profiles = [p for p in profiles if query in p.get('name', '').lower() or query in p.get('aadhar', '').lower()]
-            
-        self.ci_count.set_text(f"{len(profiles)} IDENTITIES")
-        self.ci_list.clear()
-        with self.ci_list:
-            if not profiles:
-                ui.label("NO MATCHING DATA FOUND").classes('w-full text-center py-20 opacity-20 font-black tracking-widest text-[10px]')
-            
-            for p in profiles:
-                with ui.row().classes('w-full p-4 cyber-panel items-center justify-between no-wrap hover:bg-white/5 transition-all'):
-                    with ui.row().classes('items-center gap-4'):
-                        # Display Thumbnail if exists
-                        if p.get('photo_thumb'):
-                            ui.image(f"data:image/jpeg;base64,{p['photo_thumb']}").classes('w-12 h-12 rounded border border-white/10 object-cover')
-                        else:
-                            ui.avatar('person', color='transparent').classes('border border-white/10').style('background-color: rgba(255,255,255,0.05); color: white')
-                            
-                        with ui.column().classes('gap-0'):
-                            ui.label(p.get('name', 'Unknown')).classes('font-black text-xs tracking-wider')
-                            ui.label(p.get('aadhar', '')).classes('text-[12px] font-mono opacity-40')
-                            if p.get('phone'):
-                                ui.label(p.get('phone')).classes('text-[11px] opacity-40 italic mt-1')
-
-                    with ui.row().classes('items-center gap-6'):
-                        # Threat Indicator
-                        threat = p.get('threat_level', 'Low')
-                        threat_color = 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'
-                        ui.badge(threat.upper()).props(f'color={threat_color} size=xs').classes('text-[7px] px-2 font-bold')
-                        
-                        # Actions
-                        with ui.row().classes('gap-1'):
-                            ui.button(icon='analytics', on_click=lambda p=p: self._show_tracking(p)).props('flat round size=sm').classes('action-btn')
-                            ui.button(icon='edit', on_click=lambda p=p: self._edit_ci(p)).props('flat round size=sm').classes('action-btn')
-                            ui.button(icon='delete', on_click=lambda p=p: self._delete_ci(p['aadhar'])).props('flat round size=sm').classes('action-btn text-red-500')
-
-    def _filter_ci(self):
-        self._load_ci()
-
-    def _delete_ci(self, aadhar: str):
-        delete_profile(aadhar)
-        self._load_ci()
-        ui.notify("Target purged from central registry.", type='warning')
-
-    def _edit_ci(self, profile: dict):
-        with ui.dialog().classes('p-0') as dialog, ui.card().classes('w-[500px] cyber-panel p-8 gap-6'):
-            ui.label("Moderate neural profile").classes('text-lg font-black tracking-widest mb-2 glow-text')
-            
-            with ui.column().classes('w-full gap-4'):
-                ui.label("Identity details").classes('text-[10px] font-black tracking-widest opacity-30 mb-2')
-                name_input = ui.input(label="Name", value=profile.get('name')).props('dark standout square').classes('w-full')
-                phone_input = ui.input(label="Communication", value=profile.get('phone')).props('dark standout square').classes('w-full')
-                address_input = ui.input(label="Location data", value=profile.get('address')).props('dark standout square').classes('w-full')
-                threat_select = ui.select(['Low', 'Medium', 'High'], value=profile.get('threat_level', 'Low'), label="Threat profiling").props('dark standout square').classes('w-full')
-            
-            async def save():
-                data = {
-                    "name": name_input.value,
-                    "phone": phone_input.value,
-                    "address": address_input.value,
-                    "threat_level": threat_select.value
-                }
-                from core.watchdog_indexer import update_profile
-                await asyncio.to_thread(update_profile, profile['aadhar'], data)
-                self._load_ci()
-                ui.notify("PROFILE SYNCHRONIZED", color='green')
-                dialog.close()
-                self._load_ci()
-                ui.notify("Profile metadata updated.", color='green')
-
-            with ui.row().classes('w-full justify-end gap-3 mt-4'):
-                ui.button("CANCEL", on_click=dialog.close).props('flat dark')
-                ui.button("SAVE UPDATES", on_click=save).classes('px-6 h-12 cyber-btn').style(f'background-color: {PRIMARY_COLOR};')
-        dialog.open()
-
-    def _show_tracking(self, profile: dict):
-        from core.watchdog_indexer import get_activity_report
-        logs = get_activity_report(profile['aadhar'], limit=20)
-        
-        with ui.dialog().classes('p-0') as dialog, ui.card().classes('w-[600px] cyber-panel p-0 flex column no-wrap'):
-            with ui.row().classes('w-full p-6 justify-between items-center border-b border-white/5'):
-                ui.label(f"TRACKING DOSSIER: {profile.get('name', 'Unknown')}").classes('font-black tracking-widest')
-                ui.button(icon='close', on_click=dialog.close).props('flat round size=sm')
-            
-            with ui.column().classes('w-full p-6 gap-3 overflow-y-auto max-h-[500px]'):
-                if not logs:
-                    ui.label("NO RECENT TRACKING DATA AVAILABLE.").classes('w-full text-center py-10 opacity-30 text-[10px] italic')
-                else:
-                    for log in logs:
-                        with ui.row().classes('w-full p-3 bg-white/5 rounded items-center justify-between no-wrap'):
-                            with ui.column().classes('gap-0'):
-                                # Handle new single string 'location' vs legacy 'locations' list
-                                loc = log.get('location')
-                                if not loc:
-                                    locs_list = log.get('locations', ['Unknown'])
-                                    loc = locs_list[0] if isinstance(locs_list, list) else str(locs_list)
+                    results = await discover_cameras()
+                    status.set_text(f'FOUND {len(results)} POTENTIAL NODES')
+                    status.classes(remove='animate-pulse')
+                    results_div.clear()
+                    
+                    if not results:
+                        with results_div:
+                            ui.label('No active nodes detected. Retry?').classes('text-white/20 italic text-xs py-2')
+                        return
+                    
+                    for res in results:
+                        ip = res['ip']
+                        port = res['ports'][0] if res['ports'] else '554'
+                        with results_div:
+                            with ui.row().classes('w-full items-center justify-between p-4 border border-white/5 hover:border-primary/40 transition-all rounded bg-white/5 group cursor-pointer') as r_item:
+                                def on_row_click(i=ip, p=port):
+                                    self.selected_node_info = {"ip": i, "port": p}
+                                    ui.notify(f"Node {i} selected.")
+                                    # Highlight selected
+                                    for child in results_div.default_slot.children:
+                                        child.classes(remove='border-primary/40 bg-primary/5', add='border-white/5 bg-white/5')
+                                    r_item.classes(remove='border-white/5 bg-white/5', add='border-primary/40 bg-primary/5')
                                 
-                                ui.label(loc.upper()).classes('text-[13px] font-black tracking-wider text-blue-400')
-                                ui.label(log.get('client_id')).classes('text-[11px] opacity-30 font-mono')
-                            ui.label(log.get('date_str')).classes('text-[12px] font-mono opacity-50')
+                                r_item.on('click', on_row_click)
+                                with ui.column().classes('gap-0'):
+                                    ui.label(ip).classes('font-black text-sm group-hover:text-primary transition-colors')
+                                    ui.label(f"PORT {port} | {res['type'].upper()}").classes('text-[10px] opacity-30 font-mono uppercase')
+                                ui.icon('radio_button_checked', color='primary').classes('opacity-10 group-hover:opacity-100 transition-opacity')
+
+                except Exception as ex:
+                    status.set_text(f'SCAN ERROR: {ex}')
+                    logger.error(f"Discovery Error: {ex}")
+
+            with ui.column().classes('w-full gap-6'):
+                # 1. SCAN RESULTS
+                with ui.column().classes('w-full gap-2'):
+                    with ui.row().classes('w-full items-center justify-between'):
+                        status = ui.label('Initializing signal scan...').classes('text-[10px] font-bold tracking-widest text-primary/40 uppercase animate-pulse')
+                        ui.button(icon='refresh', on_click=run_discovery).props('flat round dense')
+                    results_div = ui.column().classes('w-full max-h-60 overflow-y-auto gap-2 scroll-hidden')
+
+                ui.separator().classes('bg-white/5')
+
+                # 2. CAMERA DETAILS
+                with ui.column().classes('w-full gap-4'):
+                    name_input = ui.input('CAMERA NAME').classes('w-full').props('dense dark placeholder="e.g. Front Door, Parking Lot"')
+                    with ui.row().classes('w-full gap-4'):
+                        user_input = ui.input('USERNAME').classes('flex-1').props('dense dark placeholder="admin"')
+                        pass_input = ui.input('PASSWORD').classes('flex-1').props('dense dark placeholder="password" password')
+                        user_input.value = "admin"
+                        pass_input.value = "PASS"
+
+                def proceed_link():
+                    ip = self.selected_node_info.get("ip")
+                    port = self.selected_node_info.get("port")
+                    if not ip:
+                        ui.notify("Select a node from the scan results first.", type='warning')
+                        return
+                    
+                    user = user_input.value or "admin"
+                    pwd = pass_input.value or "PASS"
+                    
+                    # Generate unique CID based on name or fallback to IP
+                    raw_name = name_input.value.strip() if name_input.value else ""
+                    if raw_name:
+                        # Sanitize name: alphanumeric and underscores only
+                        import re
+                        cid = re.sub(r'[^a-zA-Z0-9]', '_', raw_name).upper()
+                    else:
+                        cid = f"CAM-{ip.split('.')[-1]}"
+                    
+                    try:
+                        url = RTSP_URL_TEMPLATE.format(username=user, password=pwd, ip=ip, port=port)
+                    except:
+                        url = f"rtsp://{user}:{pwd}@{ip}:{port}/"
+                    
+                    self._link_camera(cid, url, dialog)
+
+                ui.button('ADD CAMERA', on_click=proceed_link).classes('w-full py-4 cyber-btn mt-2').props('unelevated')
+            
+            # Auto-run discovery on open
+            ui.timer(0.1, run_discovery, once=True)
+            
+            ui.button('CLOSE', on_click=dialog.close).classes('self-center opacity-30 hover:opacity-100 text-[10px] font-black tracking-widest mt-4').props('flat')
         dialog.open()
 
-    def _update_system_stats(self):
-        """Update CPU, GPU and RAM stats with enhanced system insights"""
+    def _link_camera(self, cid: str, url: str, dialog):
+        if not cid or not url:
+            ui.notify("Missing ID or URL", type='warning')
+            return
+            
         try:
-            import psutil
-            import subprocess
-            import platform
+            # 1. Persistence (Include the RTSP URL)
+            register_camera_metadata(cid, ["Manual"], url)
             
-            # 1. Basic CPU and RAM
-            cpu_usage = psutil.cpu_percent()
-            ram = psutil.virtual_memory()
+            # 2. Immediate Initialization
+            from components.processor import Processor
+            if cid in active_sessions:
+                active_sessions[cid].stop()
+                
+            proc = Processor(cid, source_url=url)
+            active_sessions[cid] = proc
+            proc.add_listener(self)
+            proc.start()
             
-            # 2. GPU stat
-            gpu_usage = "0%"
-            vram_usage = "0MB"
+            # 3. UI Update
+            card = self.grid_view.add_camera(cid)
+            card.update_stream(True)
             
-            try:
-                # Get GPU Util and VRAM
-                res = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], encoding='utf-8')
-                parts = [p.strip() for p in res.split(',')]
-                if len(parts) >= 3:
-                    gpu_usage = f"{parts[0]}%"
-                    vram_usage = f"{int(parts[1])}MB"
-            except Exception:
-                pass
-
-            # 4. Update UI Labels
-            if hasattr(self, 'cpu_label'):
-                self.cpu_label.set_text(f"CPU: {cpu_usage}%")
-            
-            if hasattr(self, 'mem_label'):
-                self.mem_label.set_text(f"RAM: {ram.percent}%")
-                self.mem_label.tooltip(f"MEM: {ram.used//(1024**2)}MB / {ram.total//(1024**2)}MB")
-            
-            if hasattr(self, 'gpu_label'):
-                self.gpu_label.set_text(f"{gpu_usage} | {vram_usage}")
-
-            # Health pulse color logic
-            if hasattr(self, 'health_icon'):
-                if cpu_usage > 100 or ram.percent > 95: # Extreme thresholds
-                    self.health_icon.style('color: #FF3333 !important; opacity: 1;')
-                else:
-                    self.health_icon.style('color: #00FF94 !important; opacity: 0.6;')
-
+            dialog.close()
+            ui.notify(f"Camera linked: {cid}", type='positive')
+            logger.info(f"UI: Manually linked camera {cid} -> {url}")
         except Exception as e:
-            print(f"Stats Error: {e}")
+            ui.notify(f"Link failed: {e}", type='negative')
+            logger.error(f"Link Error: {e}")
 
-# Initialize database
-app.on_startup(init_db)
+    def _on_fullscreen(self, client_id: str):
+        with ui.dialog().classes('w-full h-full') as dialog:
+            dialog.props('maximized')
+            with ui.card().classes('w-full h-full p-0 bg-black items-center justify-center relative overflow-hidden'):
+                encoded_cid = urllib.parse.quote(client_id)
+                ui.interactive_image(f"/stream/{encoded_cid}").classes('h-full')
+                ui.button(icon='close', on_click=dialog.close).props('flat round color=white').classes('absolute top-4 right-4 z-50 bg-black/20')
+                ui.label(f"TACTICAL FEED: {client_id}").classes('absolute top-4 left-4 font-black tracking-[4px] opacity-20 text-[10px]')
+        dialog.open()
 
-# Mount the existing streaming server
-app.mount('/api', streaming_app)
+    def _on_delete_camera(self, client_id: str):
+        with ui.dialog() as dialog, ui.card().classes('p-6 cyber-panel'):
+            ui.label('CONFIRM DELETION').classes('text-xs font-black tracking-[4px] text-red-500 mb-4')
+            ui.label(f"Purge all records for node {client_id}?").classes('text-[12px] opacity-70 mb-6')
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('CANCEL', on_click=dialog.close).props('flat')
+                ui.button('PURGE', on_click=lambda: (
+                    ui.notify(f"Node purged: {client_id}", type='warning'),
+                    delete_camera(client_id), 
+                    active_sessions[client_id].stop() if client_id in active_sessions else None,
+                    active_sessions.pop(client_id, None),
+                    self.grid_view.remove_camera(client_id), # Ensure UI is updated
+                    dialog.close()
+                )).props('flat color=red')
+        dialog.open()
 
-# Create the dashboard instance
-dashboard: Optional[NiceDashboard] = None
+    def _on_enroll_upload(self, e):
+        self.uploaded_image_bytes = e.content.read()
+        self.enroll_view.photo_preview.set_source(f'data:image/jpeg;base64,{base64.b64encode(self.uploaded_image_bytes).decode()}')
+
+    def _on_enroll_submit(self):
+        data = self.enroll_view.get_data()
+        if not data['name'] or not self.uploaded_image_bytes:
+            ui.notify("Subject name and biometric data required.", type='warning')
+            return
+        
+        try:
+            enroll_face(data['name'], self.uploaded_image_bytes, data)
+            ui.notify(f"Subject enrolled: {data['name']}", type='positive')
+            self.enroll_view.clear()
+            self.uploaded_image_bytes = None
+            self._refresh_registry()
+        except Exception as ex:
+            ui.notify(f"Enrollment failed: {ex}", type='negative')
+
+    def _on_registry_search(self, e):
+        query = e.value.lower()
+        try:
+            profiles = get_all_profiles()
+            self.registry_view.clear()
+            for profile in profiles:
+                if query in profile.get('name', '').lower() or query in profile.get('aadhar', '').lower():
+                    self.registry_view.add_profile(profile)
+        except Exception as ex:
+            print(f"DEBUG: Search error: {ex}")
+
+    def _on_registry_delete_confirm(self, aadhar: str):
+        with ui.dialog() as dialog, ui.card().classes('p-6 cyber-panel'):
+            ui.label('CONFIRM DELETION').classes('text-xs font-black tracking-[4px] text-red-500 mb-4')
+            ui.label(f'Permanently purge subject {aadhar}?').classes('text-[12px] opacity-70 mb-6')
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('CANCEL', on_click=dialog.close).props('flat')
+                def _do_delete():
+                    try:
+                        delete_profile(aadhar)
+                        ui.notify(f'Subject {aadhar} purged.', type='warning')
+                        self._refresh_registry()
+                    except Exception as ex:
+                        ui.notify(f'Delete failed: {ex}', type='negative')
+                    dialog.close()
+                ui.button('PURGE', on_click=_do_delete).props('flat color=red')
+        dialog.open()
+
+    def _on_registry_edit(self, profile: dict):
+        aadhar = profile.get('aadhar', '')
+        with ui.dialog() as dialog, ui.card().classes('p-8 cyber-panel min-w-[480px]'):
+            ui.label('EDIT SUBJECT').classes('text-xs font-black tracking-[4px] text-primary/80 mb-6')
+            name_in  = ui.input('Name',         value=profile.get('name', '')).props('dark standout square').classes('w-full mb-2')
+            phone_in = ui.input('Phone',        value=profile.get('phone', '')).props('dark standout square').classes('w-full mb-2')
+            addr_in  = ui.input('Address',      value=profile.get('address', '')).props('dark standout square').classes('w-full mb-2')
+            thr_in   = ui.select(['Low', 'Medium', 'High'], value=profile.get('threat_level', 'Low'), label='Threat level').props('dark standout square').classes('w-full mb-6')
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('CANCEL', on_click=dialog.close).props('flat')
+                def _do_save():
+                    try:
+                        update_profile(aadhar, {
+                            'name': name_in.value,
+                            'phone': phone_in.value,
+                            'address': addr_in.value,
+                            'threat_level': thr_in.value,
+                        })
+                        ui.notify('Profile updated.', type='positive')
+                        self._refresh_registry()
+                    except Exception as ex:
+                        ui.notify(f'Update failed: {ex}', type='negative')
+                    dialog.close()
+                ui.button('SAVE', on_click=_do_save).props('unelevated color=primary')
+        dialog.open()
 
 @ui.page('/')
-def index():
-    global dashboard
-    # Get local IP
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def main_page():
+    # Detect IP for the dashboard instance
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('10.255.255.255', 1))
         IP = s.getsockname()[0]
-    except:
-        IP = '127.0.0.1'
-    finally:
         s.close()
+    except: 
+        IP = '127.0.0.1'
     
-    dashboard = NiceDashboard(IP)
+    NiceDashboard(IP)
 
-@app.get('/video/{client_id}')
-def video_endpoint(client_id: str):
-    global active_sessions
-    if client_id in active_sessions:
-        frame = active_sessions[client_id].latest_processed_frame
-        if frame:
-            return Response(content=frame, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
-        else:
-            return Response(status_code=204) 
-    return Response(status_code=404)
-
-async def mjpeg_generator(client_id: str):
-    global active_sessions
-    count = 0
-    while True:
-        proc = active_sessions.get(client_id)
-        if not proc:
-            break
-        frame = proc.latest_processed_frame
-        if frame:
-            count += 1
-            if count <= 5 or count % 100 == 0:
-                print(f"DEBUG: MJPEG Generator — Serving Frame {count} for {client_id} ({len(frame)} bytes)")
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        await asyncio.sleep(0.04) # ~25 FPS for smoothness
+app.on_startup(init_db)
+app.on_shutdown(lambda: [p.stop() for p in active_sessions.values()])
+app.add_static_files('/static', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static'))
+app.mount('/api', streaming_app)
 
 @app.get('/stream/{client_id:path}')
 async def stream_endpoint(client_id: str):
-    global active_sessions
-    # Safety: unquote in case browser double-encoded or path capture preserved it
     client_id = urllib.parse.unquote(client_id)
-    print(f"DEBUG: MJPEG Endpoint — Requested CID: {client_id}")
-    if client_id not in active_sessions:
-        print(f"DEBUG: MJPEG Endpoint — 404 for {client_id}. Registry: {list(active_sessions.keys())}")
-        return Response(status_code=404)
-    print(f"DEBUG: MJPEG Endpoint — Starting stream for {client_id}")
-    return StreamingResponse(mjpeg_generator(client_id), media_type='multipart/x-mixed-replace; boundary=frame')
+    if client_id not in active_sessions: return Response(status_code=404)
+    async def gen():
+        last_frame_time = time.time()
+        try:
+            while not app.is_stopping:
+                await asyncio.sleep(0.2) # ~5fps (Optimized per user request)
+                if client_id not in active_sessions: break
+                
+                frame = active_sessions[client_id].latest_processed_frame
+                if frame:
+                    last_frame_time = time.time()
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                elif time.time() - last_frame_time > 1.0:
+                    # Yield a 'CONNECTING' or 'LAG' frame to keep generator alive 
+                    # and signal to user that we are waiting for the processor.
+                    import cv2
+                    import numpy as np
+                    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(placeholder, "CONNECTING...", (100, 240), cv2.FONT_HERSHEY_DUPLEX, 1.5, (0, 140, 255), 2)
+                    _, buffer = cv2.imencode('.jpg', placeholder, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                    last_frame_time = time.time() # Reset to avoid spamming
+        except asyncio.CancelledError:
+            pass # Graceful exit on disconnect or shutdown
+        except Exception as e:
+            logger.error(f"MJPEG Stream Error: {e}")
+        finally:
+            print(f"DEBUG: MJPEG Generator — Exiting for {client_id}")
 
-def run_nicegui():
-    ui.run(title="Ryuk AI", dark=True, reload=False, port=SERVER_PORT, show=False)
-
-if __name__ in {"__main__", "__mp_main__"}:
-    run_nicegui()
+    return StreamingResponse(gen(), media_type='multipart/x-mixed-replace; boundary=frame')

@@ -1,11 +1,17 @@
 import os
 import sys
+
+# Add project root to path
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.append(ROOT)
+
+from core.bootstrap import bootstrap_gpu
+bootstrap_gpu()
+
 import time
 import threading
 import numpy as np
-
-# Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.ai_processor import face_app
 from core.state import cache
@@ -119,14 +125,21 @@ class UnifiedInferenceEngine:
                     continue
                     
                 context = {
-                    "pose": getattr(face, "pose", [0, 0, 0]) or [0, 0, 0],
-                    "norm": getattr(face, "det_score", 0.9) * 30.0 # Heuristic if not provided, but GlobalAIProcessor SHOULD provide it.
+                    "pose": [float(p) for p in (getattr(face, "pose", [0,0,0]) or [0,0,0])],
+                    "norm": 30.0
                 }
-                # Fix: If ai_processor already computed the norm, it might be in the face object or context.
-                # Actually, GlobalAIProcessor provides it if we add it. 
-                # For now, let's just make sure we don't re-compute it if we don't have to.
-                if hasattr(face, 'norm'):
-                    context["norm"] = float(face.norm)
+                
+                # Ensure we have a valid norm (either from insightface or GlobalAIProcessor)
+                f_norm = getattr(face, 'norm', None)
+                if f_norm is not None:
+                    if hasattr(f_norm, 'item'):
+                        f_norm = f_norm.item()
+                    context["norm"] = float(f_norm)
+                else:
+                    # Fallback if norm is missing but det_score exists
+                    det_s = getattr(face, "det_score", 0.9)
+                    if hasattr(det_s, 'item'): det_s = det_s.item()
+                    context["norm"] = float(det_s) * 30.0
                 
                 ident = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD, context=context)
                 search_results.append(ident if ident else {"name": "Unknown", "threat_level": "Low"})
@@ -182,7 +195,7 @@ class UnifiedInferenceEngine:
                     
                     # 2. Frame Stale Check (Timestamp based)
                     ts = packet.get('timestamp', 0)
-                    if ts > 0 and (time.time() - ts) > 0.5: # 500ms old is too stale for security
+                    if ts > 0 and (time.time() - ts) > 2.0: # 2s stale check for GPU inference
                         # self.log(f"[UnifiedEngine] Frame Stale ({time.time()-ts:.2f}s), skipping.")
                         continue
 
