@@ -60,11 +60,16 @@ FRAME_SKIP       = INPUT_FPS // PROCESSING_FPS
 INFERENCE_THROTTLE = 1       # Process every Nth frame (Detect/Embed) relative to PROCESSING_FPS
 MAX_INFERENCE_SIZE = 640     # Optimal for TensorRT/InsightFace
 
+# AI Engine
+DETECTION_INTERVAL = 5       # Perform full AI detection every N frames (Use tracking in between)
+ENABLE_TENSORRT = True       # Set to True only if libnvinfer.so.10 is installed
+ENABLE_CUDA     = True       # Highly recommended for GPU acceleration
+
 # DeepSORT Tracking
 TRACKER_MAX_AGE = 300         # Sustained for 10s at 30fps
 TRACKER_N_INIT  = 1          # Show face boxes immediately (1 frame to confirm)
 TRACKER_MATCH_THRESHOLD = 0.7 # Cosine distance threshold for appearance matching
-TRACKER_IOU_THRESHOLD   = 0.3 # IoU threshold for spatial matching
+TRACKER_IOU_THRESHOLD   = 0.2 # Lowered 0.3 -> 0.2 for better stability between detection skips
 
 
 
@@ -110,4 +115,4 @@ ALERT_INTERVAL_MS  = 100
 CLEANUP_INTERVAL_MS = 1000
 HEALTH_INTERVAL_MS = 3000
 INTEL_CLEANUP_S    = 5.0   # Remove intel card if person unseen for N seconds
-INTEL_PANEL_WIDTH  = 320
+INTEL_PANEL_WIDTH  = 400

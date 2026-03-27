@@ -343,6 +343,7 @@ class DashboardWindow(QMainWindow):
         )
         proc.stream_inactive.connect(self._stop_session)
         proc.person_identified.connect(self.handle_detection)
+        proc.objects_detected.connect(self.handle_object_detection)
 
         self.active_sessions[client_id] = {"worker": proc, "card": card}
         watchdog.register_camera_metadata(client_id, ["Airport", "Railway Station"])
@@ -380,6 +381,44 @@ class DashboardWindow(QMainWindow):
             card = PersonInfoCard(metadata)
             self.active_intel_cards[aadhar] = card
             self.intel_list_layout.insertWidget(0, card)
+
+    def handle_object_detection(self, data: dict):
+        client_id = data.get("client_id")
+        objects = data.get("objects", [])
+        if not objects: return
+        
+        # 1. Update camera card overlay
+        obj_counts = {}
+        for o in objects:
+            lbl = o['label'].lower()
+            obj_counts[lbl] = obj_counts.get(lbl, 0) + 1
+        
+        counts_str = ", ".join([f"{c} {l}" if c > 1 else l for l, c in obj_counts.items()])
+        session = self.active_sessions.get(client_id)
+        if session:
+            session["card"].update_metadata(f"OBJ: {counts_str.upper()}")
+
+        # 2. Push to Intel Panel
+        for label, count in obj_counts.items():
+            now = time.time()
+            obj_id = f"OBJ_{label.upper()}"
+            self.intel_last_seen[obj_id] = now
+            if obj_id not in self.active_intel_cards:
+                if not self.active_intel_cards:
+                    self.toggle_intel_panel(True)
+                metadata = {
+                    'name': label.upper(),
+                    'aadhar': obj_id,
+                    'threat_level': 'Low',
+                    'source': client_id,
+                    'is_object': True,
+                    'count': count
+                }
+                card = PersonInfoCard(metadata)
+                self.active_intel_cards[obj_id] = card
+                self.intel_list_layout.insertWidget(0, card)
+            else:
+                 self.active_intel_cards[obj_id].update_count(count)
 
     def cleanup_intel_panel(self):
         now      = time.time()

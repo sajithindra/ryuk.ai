@@ -17,7 +17,9 @@ from core.ai_processor import face_app
 from core.state import cache
 import core.serialization as serde
 import core.watchdog_indexer as watchdog
-from config import FAISS_THRESHOLD, AI_BATCH_SIZE
+from core.deep_sort import DeepSortTracker
+import json
+from config import FAISS_THRESHOLD, AI_BATCH_SIZE, DETECTION_INTERVAL
 
 class UnifiedInferenceEngine:
     """
@@ -30,6 +32,11 @@ class UnifiedInferenceEngine:
         self.log("[UnifiedEngine] Initialized and connected to GlobalAIProcessor.")
         self._decoders = {} # client_id -> JpegBatchDecoder
         self._decoder_lock = threading.Lock()
+        
+        # 4. Sequential Trackers (One per Camera Stream)
+        self._trackers: dict[str, DeepSortTracker] = {}
+        self._tracker_locks: dict[str, threading.Lock] = {}
+        self._global_tracker_lock = threading.Lock()
 
     def _get_decoder(self, client_id, first_frame_raw):
         with self._decoder_lock:
@@ -97,69 +104,127 @@ class UnifiedInferenceEngine:
         if frame is None: return None
         
         start_time = time.time()
+        frame_count = packet.get('frame_count', 0)
         
-        # 1. AI Inference (Batched internally by GlobalAIProcessor)
-        res = face_app.get(frame)
-        
-        # Handle Inference Timeout or Error
-        if res is None:
-            self.log("[UnifiedEngine] WARNING: Inference returned None (timeout/error)")
-            return None
-            
-        faces = res.get("faces", []) or []
-        
-        # 2. FAISS Search & Recognition
+        # 1. Tracker Retrieval (Thread-Safe Per Stream)
+        with self._global_tracker_lock:
+            if client_id not in self._trackers:
+                self._trackers[client_id] = DeepSortTracker()
+                self._tracker_locks[client_id] = threading.Lock()
+            tracker = self._trackers[client_id]
+            lock = self._tracker_locks[client_id]
+
+        faces = []
+        objects = []
         search_results = []
-        try:
-            # Final safety check: ensure faces is a list and contains only valid items
-            if faces is None: faces = []
-            
-            for face in faces:
-                if face is None:
-                    search_results.append({"name": "Unknown", "threat_level": "Low"})
-                    continue
-                    
-                emb = getattr(face, 'embedding', None)
-                if emb is None:
-                    search_results.append({"name": "Unknown", "threat_level": "Low"})
-                    continue
-                    
-                context = {
-                    "pose": [float(p) for p in (getattr(face, "pose", [0,0,0]) or [0,0,0])],
-                    "norm": 30.0
-                }
-                
-                # Ensure we have a valid norm (either from insightface or GlobalAIProcessor)
-                f_norm = getattr(face, 'norm', None)
-                if f_norm is not None:
-                    if hasattr(f_norm, 'item'):
-                        f_norm = f_norm.item()
-                    context["norm"] = float(f_norm)
-                else:
-                    # Fallback if norm is missing but det_score exists
-                    det_s = getattr(face, "det_score", 0.9)
-                    if hasattr(det_s, 'item'): det_s = det_s.item()
-                    context["norm"] = float(det_s) * 30.0
-                
-                ident = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD, context=context)
-                search_results.append(ident if ident else {"name": "Unknown", "threat_level": "Low"})
-        except Exception as e:
-            import traceback
-            self.log(f"CRITICAL ERROR in Recognition Loop: {e}\n{traceback.format_exc()}")
-            # Ensure search_results is populated even if loop fails partially
-            while len(search_results) < len(faces):
-                search_results.append({"name": "ERROR", "threat_level": "High"})
+        # 1. Determine if we need to search for faces (Biometric Quest)
+        # We ONLY scan for faces if there is at least one unidentified person.
+        person_tracks = [t for t in tracker.tracks.values() if t.label == 'person' and t.state == 1]
+        needs_face_scan = any(not t.is_identified for t in person_tracks)
         
+        # 2. Selective AI Inference (Detect Once, Track Persistent)
+        # We define a "Grace Period" to stabilize velocity after identification.
+        # This prevents the 'confusion' where detection drops abruptly after FR.
+        stable_tracks = [t for t in person_tracks if t.is_identified and t.hits > (t.hits_at_id + 15 if hasattr(t, 'hits_at_id') else 15)]
+        needs_stability = len(stable_tracks) < len(person_tracks)
+        
+        should_run_ai = (frame_count % DETECTION_INTERVAL == 0) or (len(person_tracks) == 0) or needs_face_scan or needs_stability
+
+        with lock:
+            if should_run_ai:
+                res = face_app.get(frame, detect_faces=needs_face_scan, detect_objects=True)
+                
+                if res is not None:
+                    faces_detected = res.get("faces", []) or []
+                    objects_detected = res.get("objects", []) or []
+                    
+                    # Combine detections for tracker (YOLO objects + Faces if any)
+                    tracker_input = objects_detected + faces_detected
+                    tracker.update(tracker_input)
+                    
+                    # Store hits at point of identification for grace-period logic
+                    # This tells the engine they've just been found, so stay in high-freq mode for a bit
+                    for tid, track in tracker.tracks.items():
+                        if track.is_identified and not hasattr(track, 'hits_at_id'):
+                            track.hits_at_id = track.hits
+                else:
+                    tracker.predict()
+            else:
+                # High-efficiency path: Use motion models to advance tracks without running AI
+                tracker.predict()
+                faces_detected = [] # No new face detections this frame
+            
+            # 3. Association & Identity Pinning
+            output_faces = []
+            output_objects = [] # We'll return the person tracks mainly
+            
+            for tid, track in tracker.tracks.items():
+                if track.state == 2: continue # Deleted
+                
+                # Include all tracked objects (person, car, etc.)
+                bbox = track.smoothed_bbox.tolist()
+                name = "Unknown"
+                threat = "Low"
+                
+                if track.label == 'person':
+                    # SEARCH FOR FACE INSIDE THIS PERSON BOX (if we ran detection)
+                    if not track.is_identified and needs_face_scan:
+                        for face in faces_detected:
+                            f_bbox = face.bbox.tolist()
+                            # Check if face box is mostly inside the person box
+                            if (f_bbox[0] >= bbox[0]-10 and f_bbox[1] >= bbox[1]-10 and 
+                                f_bbox[2] <= bbox[2]+10 and f_bbox[3] <= bbox[3]+10):
+                                
+                                # Found a face candidate for this person! Run Recognition.
+                                if hasattr(face, 'embedding') and face.embedding is not None:
+                                    context = {"pose": [0,0,0], "norm": 30.0}
+                                    ident = watchdog.recognize_face(face.embedding, threshold=FAISS_THRESHOLD, context=context)
+                                    if ident and ident.get("name") != "Unknown":
+                                        track.identity = ident
+                                        track.is_identified = True
+                                        self.log(f"[IdentityQuest] Identified Track {tid} as '{ident['name']}'")
+                                        break
+                    
+                    # Use Pinned Identity if available
+                    if track.is_identified:
+                        name = track.identity.get("name", "Unknown")
+                        threat = track.identity.get("threat_level", "Low")
+                else:
+                    # Non-person objects (car, bottle, etc.)
+                    name = track.label.capitalize()
+                
+                # Create the output object
+                obj_dict = {
+                    "track_id": tid,
+                    "bbox": bbox,
+                    "label": track.label,
+                    "name": name,
+                    "threat_level": threat,
+                    "is_identified": track.is_identified
+                }
+                output_objects.append(obj_dict)
+                
+                if track.label == 'person':
+                    # Also append to search_results for legacy compatibility if needed
+                    search_results.append({"name": name, "threat_level": threat, "track_id": tid})
+                
+                elif track.label == 'face':
+                    # If we are tracking legacy faces, add them too (optional)
+                    if not any(obj['track_id'] == tid for obj in output_objects):
+                        output_faces.append(track.raw_face if track.raw_face else {"bbox": bbox})
+
         latency = (time.time() - start_time) * 1000
         
-        # Construct the unified results packet
+        # 4. Construct the unified results packet
         result_packet = {
             "client_id": client_id,
-            "frame_count": packet.get('frame_count', 0),
+            "frame_count": frame_count,
             "timestamp": packet.get('timestamp', time.time()),
-            "faces": faces,  # Original detections for drawing
-            "recognition": search_results, # Recognition results
-            "latency": latency
+            "faces": output_faces,  
+            "objects": output_objects, # The primary person tracks with IDs
+            "recognition": search_results, 
+            "latency": latency,
+            "biometric_active": needs_face_scan
         }
         
         return result_packet
@@ -171,6 +236,26 @@ class UnifiedInferenceEngine:
         self.log("RYUK AI — UNIFIED INFERENCE ENGINE (GPU)")
         self.log("=" * 60)
         self.log("\n[READY] Waiting for ingestion stream ('ryuk:ingest')...")
+
+        # Reinforcement Feedback Worker
+        def feedback_worker():
+            self.log("[UnifiedEngine] Feedback worker active.")
+            while self.running:
+                try:
+                    packed = cache.blpop("ryuk:feedback", timeout=1.0)
+                    if packed:
+                        _, data = packed
+                        feedback = json.loads(data)
+                        det_id = feedback.get('det_id')
+                        is_correct = feedback.get('is_correct')
+                        if det_id is not None and is_correct is not None:
+                            face_app.save_feedback(det_id, is_correct)
+                except Exception as e:
+                    self.log(f"Feedback worker error: {e}")
+                    time.sleep(1.0)
+        
+        fb_thread = threading.Thread(target=feedback_worker, daemon=True)
+        fb_thread.start()
 
         def worker():
             while self.running:

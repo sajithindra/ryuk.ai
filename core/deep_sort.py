@@ -36,9 +36,9 @@ class KalmanFilter:
         self.H = np.zeros((4, 8))
         self.H[:4, :4] = np.eye(4)
         
-        # Process noise covariance
-        self.Q = np.eye(8) * 0.01
-        self.Q[4:, 4:] *= 0.01
+        # Process noise covariance: Increased for better stability with detection skips
+        self.Q = np.eye(8) * 0.05
+        self.Q[4:, 4:] *= 0.05
         
         # Measurement noise covariance
         self.R = np.eye(4) * 1.0
@@ -57,15 +57,19 @@ class KalmanFilter:
         self.P = (np.eye(8) - K @ self.H) @ self.P
 
 class DeepSortTrack:
-    def __init__(self, track_id, bbox, face_embedding=None, raw_face=None):
+    def __init__(self, track_id, bbox, face_embedding=None, raw_face=None, label='face'):
         self.track_id = track_id
+        self.label = label
         self.kf = KalmanFilter(bbox)
         self.face_embedding = face_embedding
         self.raw_face = raw_face
         self.hits = 1
         self.state = 0 # 0: Tentative, 1: Confirmed, 2: Deleted
-        self.pinned_identity = None
-        self.id_cache = None
+        
+        # Persistent Identity (The 'Pinned' Name)
+        self.identity = None 
+        self.is_identified = False
+        self.pinned_identity = None # Legacy/Sync field
         
         self.time_since_update = 0
         
@@ -96,11 +100,12 @@ class DeepSortTrack:
         self.smoothed_bbox = alpha * predicted + (1.0 - alpha) * self.smoothed_bbox
         return predicted
 
-    def update(self, bbox, face_embedding=None, raw_face=None):
+    def update(self, bbox, face_embedding=None, raw_face=None, label=None):
         self.kf.update(bbox)
         self.raw_face = raw_face
+        if label: self.label = label
         
-        # Exponential moving average for embeddings
+        # Exponential moving average for embeddings (Only for faces or if person provides face chip)
         alpha = 0.9
         
         if face_embedding is not None:
@@ -127,9 +132,16 @@ class DeepSortTrack:
         # Especially when processing (5fps) is slower than input (30fps)
         elapsed = time.time() - self.last_update_time
         
-        # If we have a pinned identity, we allow the track to stay longer (e.g. 60s)
+        # If we have a pinned identity, we allow the track to stay MUCH longer (e.g. 120s)
         # to survive long occlusions or bad angles without losing the person.
-        threshold = FACE_PINNED_MAX_INACTIVE_S if self.pinned_identity else FACE_MAX_INACTIVE_S
+        base_threshold = FACE_PINNED_MAX_INACTIVE_S if self.pinned_identity else FACE_MAX_INACTIVE_S
+        
+        # Persons (body) tracks are more stable than face tracks
+        if self.label == 'person':
+            threshold = base_threshold * 2.0
+        else:
+            threshold = base_threshold
+            
         return elapsed > threshold
 
     @property
@@ -161,17 +173,26 @@ class DeepSortTracker:
         detections = []
         face_embs = []
         raw_faces_list = []
+        labels = []
         
         for f in faces:
-            bbox = getattr(f, 'bbox', None)
-            if bbox is None and isinstance(f, dict): bbox = f.get('bbox')
-            emb = getattr(f, 'embedding', None)
-            if emb is None and isinstance(f, dict): emb = f.get('embedding')
+            bbox = None
+            emb = None
+            label = 'face'
+            
+            if hasattr(f, 'bbox'): 
+                bbox = f.bbox
+                emb = getattr(f, 'embedding', None)
+            elif isinstance(f, dict):
+                bbox = f.get('bbox')
+                emb = f.get('embedding')
+                label = f.get('label', 'face')
             
             if bbox is not None:
                 detections.append(bbox)
                 face_embs.append(emb)
                 raw_faces_list.append(f)
+                labels.append(label)
 
         if not detections:
             # Just age existing tracks
@@ -183,6 +204,7 @@ class DeepSortTracker:
             return
 
         detections = np.array(detections) / scale
+        labels = np.array(labels)
         
         # 2. Matching by Appearance (Fused Cosine Distance)
         confirmed_ids = [tid for tid, t in self.tracks.items() if t.state == 1]
@@ -207,8 +229,9 @@ class DeepSortTracker:
             
             row_ind, col_ind = linear_sum_assignment(cost_matrix)
             for r, c in zip(row_ind, col_ind):
-                if cost_matrix[r, c] < self.match_threshold:
-                    tid = confirmed_ids[r]
+                # Ensure labels match and distance is within threshold
+                tid = confirmed_ids[r]
+                if labels[c] == self.tracks[tid].label and cost_matrix[r, c] < self.match_threshold:
                     matches.append((tid, c))
                     if tid in unmatched_tracks: unmatched_tracks.remove(tid)
                     if c in unmatched_detections: unmatched_detections.remove(c)
@@ -224,9 +247,11 @@ class DeepSortTracker:
             
             row_ind, col_ind = linear_sum_assignment(-iou_matrix) # maximize IOU
             for r, c in zip(row_ind, col_ind):
-                if iou_matrix[r, c] > self.iou_threshold:
-                    tid = unmatched_tracks[r]
-                    det_idx = unmatched_detections[c]
+                tid = unmatched_tracks[r]
+                det_idx = unmatched_detections[c]
+                # Allow IOU match ONLY if labels match
+                # Relaxed IOU threshold check because of higher detection intervals
+                if labels[det_idx] == self.tracks[tid].label and iou_matrix[r, c] > self.iou_threshold:
                     matches.append((tid, det_idx))
                     
         # Remove matched items before distance matching
@@ -267,7 +292,8 @@ class DeepSortTracker:
             self.tracks[tid].update(
                 detections[det_idx], 
                 face_embedding=face_embs[det_idx], 
-                raw_face=raw_faces_list[det_idx]
+                raw_face=raw_faces_list[det_idx],
+                label=labels[det_idx]
             )
 
         # 3. Handle Unmatched Detections (New Tracks)
@@ -276,7 +302,8 @@ class DeepSortTracker:
                 self._next_id, 
                 detections[det_idx], 
                 face_embedding=face_embs[det_idx], 
-                raw_face=raw_faces_list[det_idx]
+                raw_face=raw_faces_list[det_idx],
+                label=labels[det_idx]
             )
             self._next_id += 1
 

@@ -145,16 +145,32 @@ class WatchdogIndexer:
         except Exception: pass
         logger.info(f"FAISS: Loaded {len(embeddings)} vectors for {len(identities)} identities.")
 
-    def enroll_face(self, image_path: str, aadhar: str, name: str,
-                    threat_level: str = "Low", phone: str = "", address: str = ""):
+    def enroll_face(self, image_source: str | bytes, aadhar: str = None, name: str = None,
+                    threat_level: str = "Low", phone: str = "", address: str = "", 
+                    metadata: dict = None):
         from core.ai_processor import get_ai_processor
         ai = get_ai_processor()
         
-        if not os.path.exists(image_path): raise ValueError(f"Image not found: {image_path}")
-        frame = cv2.imread(image_path)
-        if frame is None: raise ValueError("Could not decode image.")
+        # 1. Handle Metadata Dict if provided (for NiceGUI)
+        if metadata:
+            aadhar = metadata.get('aadhar', aadhar)
+            name = metadata.get('name', name)
+            threat_level = metadata.get('threat_level', threat_level)
+            phone = metadata.get('phone', phone)
+            address = metadata.get('address', address)
 
-        result = ai.get(frame)
+        # 2. Decode Image (File Path or Bytes)
+        if isinstance(image_source, bytes):
+            arr = np.frombuffer(image_source, np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None: raise ValueError("Could not decode image bytes.")
+        else:
+            if not os.path.exists(image_source): raise ValueError(f"Image not found: {image_source}")
+            frame = cv2.imread(image_source)
+            if frame is None: raise ValueError("Could not decode image file.")
+
+        # 3. Process with High Priority (Always skip frame-dropping logic)
+        result = ai.get(frame, priority=True)
         faces = result.get("faces", [])
         if not faces: raise ValueError("No faces detected.")
         if len(faces) > 1: raise ValueError("Multiple faces in enrolment image.")

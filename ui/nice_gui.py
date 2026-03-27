@@ -11,6 +11,7 @@ import subprocess
 import socket
 import logging
 import psutil
+import threading
 from datetime import datetime
 from typing import Dict, List, Optional
 from fastapi import Response
@@ -152,11 +153,11 @@ class NiceDashboard:
 
             # 3. SIDE PANELS
             # Intel Panel (Right)
-            with ui.column().classes('h-full w-80 telemetry-bar p-4 gap-4 transition-all duration-500 border-l border-white/10') as self.intel_panel:
+            with ui.column().classes('h-full w-[400px] telemetry-bar p-4 gap-4 transition-all duration-500 border-l border-white/10') as self.intel_panel:
                 ui.label("LIVE INTELLIGENCE").classes('text-xs font-black tracking-[3px] text-primary/80 mb-2')
                 self.intel_scroll = ui.scroll_area().classes('grow w-full scroll-hidden')
                 with self.intel_scroll:
-                    self.intel_container = ui.column().classes('w-full gap-2')
+                    self.intel_container = ui.column().classes('w-full gap-4')
 
         # Control panel toggle buttons (absolute positioned)
         ui.button(on_click=lambda: self.toggle_panel('intel')).props('icon=chevron_right flat').classes('absolute right-2 top-1/2 -translate-y-1/2 opacity-20 hover:opacity-100 z-10')
@@ -495,11 +496,39 @@ class NiceDashboard:
         
         if aadhar not in self.intel_elements:
             with self.intel_container:
-                item = IntelPanelItem(metadata).on('click', lambda a=aadhar: self._show_activity_tracking(a))
+                # Custom handling for objects vs persons
+                is_obj = metadata.get('is_object', False)
+                item = IntelPanelItem(metadata)
+                
+                # Bind reinforcement feedback
+                if metadata.get('det_id'):
+                    item.on_feedback = lambda is_correct, d_id=metadata['det_id']: self.handle_reinforcement(d_id, is_correct)
+                
+                if not is_obj:
+                    item.on('click', lambda a=aadhar: self._show_activity_tracking(a))
                 self.intel_elements[aadhar] = item
         else:
             # Update the existing card instead of adding a new one
-            self.intel_elements[aadhar].update_count(self.intel_counts[aadhar], camera)
+            count = metadata.get('count', 1) if metadata.get('is_object') else self.intel_counts[aadhar]
+            self.intel_elements[aadhar].update_count(count, camera)
+            
+            # Refresh det_id for latest object in group
+            if metadata.get('det_id'):
+                self.intel_elements[aadhar].on_feedback = lambda is_correct, d_id=metadata['det_id']: self.handle_reinforcement(d_id, is_correct)
+
+    def handle_reinforcement(self, det_id, is_correct):
+        """Bridge UI feedback to the AI engine."""
+        if not det_id: return
+        # Find the AI processor (it's in app.state or similar, but Processor holds ref to listeners)
+        # Actually, it's easier to use a global reference or pass it during init.
+        # In this codebase, AI is likely in service/unified_engine.py but Processor doesn't have direct access to 'save_feedback'.
+        # However, unified_engine is a separate process. I should use Redis to signal feedback.
+        try:
+            feedback_data = {"det_id": det_id, "is_correct": is_correct}
+            cache.rpush("ryuk:feedback", json.dumps(feedback_data))
+            logger.info(f"UI: Feedback queued for {det_id} (correct={is_correct})")
+        except Exception as e:
+            logger.error(f"UI: Failed to queue feedback: {e}")
 
     def _show_activity_tracking(self, aadhar: str):
         profile = get_profile(aadhar) or {}
@@ -600,9 +629,9 @@ class NiceDashboard:
         client_id = data.get('client_id')
         detections = data.get('detections', [])
         
-        # 1. Update camera card overlay text
+        # 1. Update camera card overlay text (Face names)
         if client_id in self.camera_cards and detections:
-            names = [d.get('name', 'Unknown') for d in detections if d.get('name') != 'Unknown']
+            names = [d.get('name', 'Unknown') for d in detections if d.get('name', 'Unknown') != 'Unknown']
             if names:
                 text = f"DET: {', '.join(names)}"
                 self.ui_queue.put(lambda c=self.camera_cards[client_id], t=text: c.update_metadata(t))
@@ -613,6 +642,40 @@ class NiceDashboard:
                 # Enrich with source camera
                 enriched = {**det, 'source': client_id}
                 self.ui_queue.put(lambda d=enriched: self._update_intel(d))
+
+    def on_object_detection(self, data: dict):
+        """Callback from Processor when general objects are detected."""
+        client_id = data.get('client_id')
+        objects = data.get('objects', [])
+        if not objects: return
+        
+        # 1. Update camera card overlay (Object names)
+        obj_counts = {}
+        obj_latest_ids = {} # {label: det_id}
+        for o in objects:
+            lbl = o['label'].lower()
+            obj_counts[lbl] = obj_counts.get(lbl, 0) + 1
+            if 'det_id' in o:
+                obj_latest_ids[lbl] = o['det_id']
+        
+        if obj_counts:
+            counts_str = ", ".join([f"{c} {l}" if c > 1 else l for l, c in obj_counts.items()])
+            text = f"OBJ: {counts_str.upper()}"
+            if client_id in self.camera_cards:
+                 self.ui_queue.put(lambda c=self.camera_cards[client_id], t=text: c.update_metadata(t))
+        
+        # 2. Push to Intel Panel
+        for label, count in obj_counts.items():
+            enriched = {
+                'name': label.upper(),
+                'aadhar': f"OBJ_{label.upper()}", # Group by object type
+                'det_id': obj_latest_ids.get(label),
+                'threat_level': 'Low',
+                'source': client_id,
+                'is_object': True,
+                'count': count
+            }
+            self.ui_queue.put(lambda d=enriched: self._update_intel(d))
 
 
     def on_stream_start(self, client_id: str):
@@ -777,24 +840,58 @@ class NiceDashboard:
                 )).props('flat color=red')
         dialog.open()
 
-    def _on_enroll_upload(self, e):
-        self.uploaded_image_bytes = e.content.read()
+    async def _on_enroll_upload(self, e):
+        # 1. Await the file stream from the browser (e.g., Starlette UploadFile)
+        try:
+            content = e.file.read()
+            if asyncio.iscoroutine(content):
+                self.uploaded_image_bytes = await content
+            else:
+                self.uploaded_image_bytes = content
+        except Exception as ex:
+            ui.notify(f"Processing Error: {ex}", type='negative')
+            return
+
+        # 2. Update UI Preview
         self.enroll_view.photo_preview.set_source(f'data:image/jpeg;base64,{base64.b64encode(self.uploaded_image_bytes).decode()}')
+        ui.notify("Biometric photo processed successfully", type='positive', icon='check_circle')
 
     def _on_enroll_submit(self):
         data = self.enroll_view.get_data()
         if not data['name'] or not self.uploaded_image_bytes:
-            ui.notify("Subject name and biometric data required.", type='warning')
+            ui.notify("Subject name and biometric data required before commitment.", type='warning')
             return
         
-        try:
-            enroll_face(data['name'], self.uploaded_image_bytes, data)
-            ui.notify(f"Subject enrolled: {data['name']}", type='positive')
-            self.enroll_view.clear()
-            self.uploaded_image_bytes = None
-            self._refresh_registry()
-        except Exception as ex:
-            ui.notify(f"Enrollment failed: {ex}", type='negative')
+        ui.notify(f"Committing {data['name']} to Neural Index...", type='info', icon='sync_lock')
+
+        def do_enroll():
+            try:
+                # 3. High-Priority Biometric Indexing (Using updated Registry logic)
+                status = enroll_face(
+                    self.uploaded_image_bytes,
+                    data['aadhar'],
+                    data['name'],
+                    data['threat_level'],
+                    data['phone'],
+                    data['address'],
+                    data.get('notes', '')
+                )
+                if status:
+                    # Notify SUCCESS in UI thread context
+                    def notify_success():
+                        ui.notify(f"Enrollment Complete: {data['name']} is now in the registry.", type='positive', icon='cloud_done')
+                        self.enroll_view.clear()
+                        self.uploaded_image_bytes = None
+                        # Refresh the whole platform's knowledge
+                        self._on_refresh_registry()
+                    
+                    self.ui_queue.put(notify_success)
+            except Exception as ex:
+                self.ui_queue.put(lambda e=str(ex): ui.notify(f"Enrollment Failed: {e}", type='negative'))
+
+        # Run blocking AI logic in background thread
+        threading.Thread(target=do_enroll, daemon=True).start()
+        
 
     def _on_registry_search(self, e):
         query = e.value.lower()

@@ -6,8 +6,20 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$PROJECT_ROOT"
 
-# 2. Configure Environment
-export LD_LIBRARY_PATH="/tmp/pip-install-5_vpsqas/onnxruntime-gpu_f68a5293444445889601f016599b4d00/onnxruntime/capi/lib:$LD_LIBRARY_PATH"
+# 2. Configure Environment (Dynamic Library Path Discovery)
+# This finds CUDA, cuDNN, and TensorRT libraries bundled in the .venv
+if [ -d "./.venv" ]; then
+    VENV_SITE_PACKAGES="./.venv/lib/python3.12/site-packages"
+    
+    # Identify directories containing .so files for Nvidia and TensorRT
+    LIB_PATHS=$(find "$VENV_SITE_PACKAGES" -maxdepth 3 -type d \( -name "lib" -o -name "tensorrt_libs" \) | tr '\n' ':')
+    
+    # Prepend to LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH="$LIB_PATHS$LD_LIBRARY_PATH"
+    
+    # Debug info (optional)
+    # echo "[*] Configured LD_LIBRARY_PATH with venv libraries."
+fi
 
 # 3. Launch with VENV Python
 if [ -f "./.venv/bin/python3" ]; then

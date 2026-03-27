@@ -253,6 +253,41 @@ def inject_styles():
                 opacity: 1;
                 transform: scale(1.1);
             }}
+
+            .tactical-card {{
+                background: rgba(15, 18, 26, 0.7) !important;
+                backdrop-filter: blur(15px);
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                border-radius: 12px !important;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                overflow: hidden;
+            }}
+            .tactical-card:hover {{
+                border-color: rgba(0, 209, 255, 0.3) !important;
+                background: rgba(18, 22, 32, 0.8) !important;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            }}
+            
+            .tactical-header {{
+                background: rgba(255, 255, 255, 0.03);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                padding: 10px 14px;
+            }}
+            
+            .status-dot {{
+                width: 6px;
+                height: 6px;
+                border_radius: 50%;
+                background: var(--primary);
+                box-shadow: 0 0 10px var(--primary);
+                animation: status-pulse 2s infinite;
+            }}
+            
+            @keyframes status-pulse {{
+                0% {{ opacity: 0.4; transform: scale(0.8); }}
+                50% {{ opacity: 1; transform: scale(1.2); }}
+                100% {{ opacity: 0.4; transform: scale(0.8); }}
+            }}
         </style>
     """)
 

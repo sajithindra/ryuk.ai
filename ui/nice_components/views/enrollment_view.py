@@ -24,8 +24,9 @@ class EnrollmentView(ui.tab_panel):
                     with ui.card().classes('cyber-panel p-8 gap-6 shrink-0 shadow-2xl').style('width: 320px;'):
                         ui.label("BIOMETRIC CAPTURE").classes('text-[11px] font-black tracking-[3px] opacity-30 text-center w-full')
 
-                        # Photo Zone
-                        with ui.element('div').classes('relative overflow-hidden rounded-2xl border border-white/10 shadow-inner group').style('width: 256px; height: 320px; background: rgba(0,0,0,0.6); margin: 0 auto;'):
+                        # Photo Zone (Click to Upload)
+                        with ui.element('div').classes('relative overflow-hidden rounded-2xl border border-white/10 shadow-inner group cursor-pointer').style('width: 256px; height: 320px; background: rgba(0,0,0,0.6); margin: 0 auto;') \
+                            .on('click', lambda: self.upload_ctrl.run_method('pickFiles')):
                             # Preview
                             self.photo_preview = ui.image('').classes('absolute inset-0 w-full h-full object-cover transition-all duration-700')
                             
@@ -46,12 +47,17 @@ class EnrollmentView(ui.tab_panel):
                             ui.element('div').classes('absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-primary/40 rounded-bl-sm')
                             ui.element('div').classes('absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-primary/40 rounded-br-sm')
 
-                            # Real Upload Control
+                            # Invisible Upload Controller (Triggered by pick_files)
+                            # Invisible Upload Controller (Triggered by pick_files)
+                            async def handle_upload(e):
+                                await on_upload(e)
+                                self._icon_overlay.set_visibility(False)
+
                             self.upload_ctrl = ui.upload(
-                                on_upload=lambda e: (on_upload(e), self._icon_overlay.set_visibility(False)),
+                                on_upload=handle_upload,
                                 label='',
                                 auto_upload=True
-                            ).classes('absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30').props('flat dark')
+                            ).classes('hidden').props('flat dark')
 
                         # Threat Pulse & Classification
                         with ui.column().classes('w-full gap-4 mt-2'):
@@ -72,7 +78,7 @@ class EnrollmentView(ui.tab_panel):
                         ui.label("TACTICAL METADATA").classes('text-[11px] font-black tracking-[3px] opacity-30')
 
                         with ui.grid(columns=2).classes('w-full gap-6'):
-                            self.enroll_name   = ui.input(label="FULL NAME NAME").props('dark standout square clearable').classes('w-full font-bold uppercase').style('letter-spacing: 0.5px')
+                            self.enroll_name   = ui.input(label="FULL NAME").props('dark standout square clearable').classes('w-full font-bold uppercase').style('letter-spacing: 0.5px')
                             self.enroll_aadhar = ui.input(label="IDENTIFICATION ID / AADHAR").props('dark standout square clearable mask="#### #### ####"').classes('w-full font-mono font-bold')
                             self.enroll_phone  = ui.input(label="COMMUNICATION CHANNEL").props('dark standout square clearable').classes('w-full font-mono')
                             self.role_select   = ui.select(

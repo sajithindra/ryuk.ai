@@ -38,7 +38,7 @@ class HwDecoder:
             # 1. Input Flags Integration
             # For RTSP/Network streams, we inject low-latency probesize/analyzeduration if not provided
             if source.startswith(("rtsp://", "http://", "https://", "rtmp://")):
-                input_flags = "-probesize 128000 -analyzeduration 100000 -rtsp_transport tcp "
+                input_flags = "-probesize 128000 -analyzeduration 100000 -rtsp_transport tcp -rtsp_flags prefer_tcp -allowed_media_types video "
             else:
                 input_flags = ""
             

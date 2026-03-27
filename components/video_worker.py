@@ -33,9 +33,10 @@ class VideoProcessor(QThread):
       4. Draws the LATEST available face results.
       5. Emits to UI.
     """
-    frame_ready      = pyqtSignal(QImage)
-    stream_inactive  = pyqtSignal(str)   # emits client_id
+    frame_ready       = pyqtSignal(QImage)
+    stream_inactive   = pyqtSignal(str)   # emits client_id
     person_identified = pyqtSignal(dict)  # emits identity metadata
+    objects_detected  = pyqtSignal(dict)  # emits {client_id, objects}
 
     def __init__(self, client_id: str):
         super().__init__()
@@ -45,6 +46,7 @@ class VideoProcessor(QThread):
         
         self._frame_count    = 0
         self._last_faces:    list[dict] = []   
+        self._last_objects:  list[dict] = []
         self._tracker        = FaceTracker()
         
         # Async state
@@ -131,7 +133,7 @@ class VideoProcessor(QThread):
                             "embedding": track.avg_embedding
                         })
 
-                self._draw_frame(frame, faces_to_draw)
+                self._draw_frame(frame, faces_to_draw, self._last_objects)
                 self._emit_frame(frame)
 
             else:
@@ -147,7 +149,14 @@ class VideoProcessor(QThread):
         try:
             results = self._run_inference(frame)
             with self._inf_lock:
-                self._last_faces = results
+                self._last_faces = results.get("faces", [])
+                self._last_objects = results.get("objects", [])
+                
+                # Signal for interesting objects
+                high_interest = ["person", "car", "motorcycle", "bicycle", "bus", "truck", "bag", "backpack", "suitcase"]
+                oi = [o for o in self._last_objects if o["label"].lower() in high_interest]
+                if oi:
+                    self.objects_detected.emit({"client_id": self.client_id, "objects": oi})
         except Exception as e:
             print(f"VideoProcessor: Async Inference Error — {e}")
         finally:
@@ -157,9 +166,9 @@ class VideoProcessor(QThread):
     # AI Logic (Runs in Background Thread)
     # ------------------------------------------------------------------
 
-    def _run_inference(self, frame: np.ndarray) -> list[dict]:
+    def _run_inference(self, frame: np.ndarray) -> dict:
         """
-        Runs heavy InsightFace, MongoDB, and Redis tasks.
+        Runs heavy InsightFace, YOLO, MongoDB, and Redis tasks.
         """
         h, w      = frame.shape[:2]
         scale     = min(MAX_INFERENCE_SIZE / w, MAX_INFERENCE_SIZE / h)
@@ -227,7 +236,7 @@ class VideoProcessor(QThread):
             })
 
         self._tracker.prune_stale()
-        return parsed_faces
+        return {"faces": parsed_faces, "objects": results.get("objects", [])}
 
     def _recognise(self, track, track_id: int, context: dict | None = None) -> tuple[str, str, dict | None]:
         """Return (name, threat_level, meta). Uses FAISS directly."""
@@ -277,16 +286,39 @@ class VideoProcessor(QThread):
     # Drawing & Transcoding
     # ------------------------------------------------------------------
 
-    def _draw_frame(self, frame: np.ndarray, faces: list[dict]):
+    def _draw_frame(self, frame: np.ndarray, faces: list[dict], objects: list[dict] = None):
+        h, w = frame.shape[:2]
+        font = cv2.FONT_HERSHEY_DUPLEX
+        font_scale = h / 640.0
+        font_scale = max(0.4, font_scale)
+        thickness = 2
+        
+        # 1. Draw General Objects
+        if objects:
+            for obj in objects:
+                lbl = obj["label"].lower()
+                if lbl == "person":
+                    continue
+
+                bbox = [int(v) for v in obj["bbox"]]
+                # Use Vivid Cyber Blue for objects
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 120, 0), 2, cv2.LINE_4)
+                
+                txt = lbl.upper()
+                (tw, th), _ = cv2.getTextSize(txt, font, font_scale * 0.7, 1)
+                lx, ly = bbox[0], bbox[1] - 5
+                if ly < th: ly = bbox[1] + th + 5
+                cv2.rectangle(frame, (lx, ly - th - 2), (lx + tw, ly + 2), (10, 8, 5), -1)
+                cv2.putText(frame, txt, (lx, ly), font, font_scale * 0.7, (255, 120, 0), 1, cv2.LINE_4)
+
+        # 2. Draw Faces (Higher Priority)
         for pf in faces:
             bbox  = pf["bbox"]
             name  = pf["name"]
             threat = pf["threat"]
             
-            main_color   = (83, 83, 255) if threat == "High" else (200, 229, 0)
+            main_color   = (83, 83, 255) if threat == "High" else (90, 222, 90) # Tactical Green
             text_color   = (255, 255, 255)
-            
-            # cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_AA)
             
             label = f" {name.upper()} "
             
@@ -294,17 +326,12 @@ class VideoProcessor(QThread):
             emb = pf.get("embedding")
             vec_str = ""
             if emb is not None:
-                # Show first 6 and last 6 dims
                 v = emb.flatten()
-                truncated = list(v[:6]) + ["..."] + list(v[-6:])
-                vec_str = "VEC: " + " ".join([f"{x:.2f}" if isinstance(x, (float, np.float32)) else str(x) for x in truncated])
+                truncated = list(v[:4]) + ["..."] + list(v[-4:])
+                vec_str = "VEC: " + " ".join([f"{x:.2f}" for x in truncated if not isinstance(x, str)])
 
-            font = cv2.FONT_HERSHEY_DUPLEX
-            font_scale = 0.8  # Increased from 0.5
-            thickness = 2    # Increased from 1
-            
             (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
-            (vw, vh), _ = cv2.getTextSize(vec_str, font, font_scale * 0.7, thickness - 1)
+            (vw, vh), _ = cv2.getTextSize(vec_str, font, font_scale * 0.6, thickness - 1)
             
             max_w = max(tw, vw)
             total_h = th + vh + 15
@@ -318,7 +345,7 @@ class VideoProcessor(QThread):
             cv2.putText(frame, label, (lx, ly - vh - 5), font, font_scale, text_color, thickness, cv2.LINE_AA)
             # Vector String
             if vec_str:
-                cv2.putText(frame, vec_str, (lx + 5, ly), font, font_scale * 0.7, main_color, thickness - 1, cv2.LINE_AA)
+                cv2.putText(frame, vec_str, (lx + 5, ly), font, font_scale * 0.6, main_color, thickness - 1, cv2.LINE_AA)
 
     def _emit_frame(self, frame: np.ndarray):
         h, w        = frame.shape[:2]

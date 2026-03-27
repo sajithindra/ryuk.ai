@@ -43,6 +43,7 @@ class Processor:
         
         self._frame_count = 0
         self._last_faces: List[Dict] = []
+        self._last_objects: List[Dict] = []
         self._tracker = FaceTracker()
         
         self._is_inf_running = False
@@ -107,7 +108,7 @@ class Processor:
             if USE_FFMPEG_CUDA:
                 # 1. Dynamic Resolution Discovery via ffprobe
                 try:
-                    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 {shlex.quote(self.source_url)}"
+                    probe_cmd = f"ffprobe -v error -rtsp_transport tcp -rtsp_flags prefer_tcp -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 {shlex.quote(self.source_url)}"
                     res_raw = subprocess.check_output(shlex.split(probe_cmd), timeout=5).decode().strip()
                     native_w, native_h = map(int, res_raw.split('x'))
                     print(f"DEBUG: Processor ({self.client_id}) — Auto-detected Stream Resolution: {native_w}x{native_h}")
@@ -247,10 +248,7 @@ class Processor:
                             continue
                             
                         # Prioritize pinned_identity for life-of-track stability
-                        meta = track.pinned_identity if track.pinned_identity else track.id_cache
-                        
-                        if not meta:
-                             _, _, meta = self._get_cached_identity(track)
+                        name, threat, meta = self._get_cached_identity(track)
                         
                         # Sync identified tracks to UI listeners to keep cards alive
                         if should_sync_ui and meta and "aadhar" in meta:
@@ -258,8 +256,10 @@ class Processor:
                         
                         faces_to_draw.append({
                             "bbox": track.smoothed_bbox.astype(int),
-                            "name": meta.get("name", "Unknown") if meta else "Unknown",
-                            "threat": meta.get("threat_level", "Low") if meta else "Low"
+                            "name": name,
+                            "threat": threat,
+                            "label": track.label,
+                            "is_identified": track.is_identified or (track.pinned_identity is not None)
                         })
 
                 if should_sync_ui:
@@ -269,7 +269,16 @@ class Processor:
                             if hasattr(l, 'on_detection'):
                                 l.on_detection({'client_id': self.client_id, 'detections': detections_to_sync})
 
-                self._draw_frame(frame, faces_to_draw)
+                # Objects for synchronization (filtered)
+                if should_sync_ui:
+                    high_interest = ["person", "car", "motorcycle", "bicycle", "bus", "truck", "bag", "backpack", "suitcase"]
+                    objects_to_sync = [o for o in self._last_objects if o["label"].lower() in high_interest]
+                    if objects_to_sync:
+                         for l in list(self.listeners):
+                            if hasattr(l, 'on_object_detection'):
+                                l.on_object_detection({'client_id': self.client_id, 'objects': objects_to_sync})
+
+                self._draw_frame(frame, faces_to_draw, self._last_objects)
                 encoded = self._encode_frame(frame)
                 if encoded:
                     self.latest_processed_frame = encoded
@@ -314,48 +323,57 @@ class Processor:
                         
                     faces = packet.get('faces', [])
                     recognition = packet.get('recognition', [])
+                    objects = packet.get('objects', [])
+                    
+                    self._last_objects = objects
                     
                     if packet.get('frame_count', 0) % 20 == 0:
-                         print(f"DEBUG: Processor ({self.client_id}) — Received Result Packet (Faces: {len(faces)})")
+                         print(f"DEBUG: Processor ({self.client_id}) — Received Result Packet (Faces: {len(faces)}, Objects: {len(objects)})")
                     
-                    # We need to map recognition (identities) back to face objects
-                    # so tracker can see them.
+                    # Combined detection list for the tracker
+                    tracker_input = []
+                    
+                    # 1. Map identities to persons if provided in original objects list
+                    # (Note: services/unified_engine.py now returns 'objects' with 'name' and 'is_identified')
+                    for obj in objects:
+                        tracker_input.append({
+                            'bbox': obj['bbox'],
+                            'label': obj.get('label', 'person'),
+                            'ident_meta': {
+                                'name': obj.get('name', 'Unknown'),
+                                'threat_level': obj.get('threat_level', 'Low'),
+                                'is_identified': obj.get('is_identified', False)
+                            }
+                        })
+                        
+                    # 2. Add standalone faces (legacy or auxiliary)
                     for i, face in enumerate(faces):
-                        if i < len(recognition):
-                            if isinstance(face, dict):
-                                face['ident_meta'] = recognition[i]
-                            else:
-                                face.ident_meta = recognition[i]
+                        meta = recognition[i] if i < len(recognition) else None
+                        tracker_input.append({
+                            'bbox': face.bbox if hasattr(face, 'bbox') else face.get('bbox'),
+                            'label': 'face',
+                            'embedding': getattr(face, 'embedding', None),
+                            'ident_meta': meta
+                        })
 
                     with self._inf_lock:
-                        # Trackers update() logic expects raw_faces (list of insightface.Face)
-                        # and scale (inf_frame to original frame).
-                        # In our packet, bboxes are already scaled to original? 
-                        # No, let's check detector.py.
-                        # detector.py takes frame as is. If Processor sends scaled frame, it's scaled.
-                        # Processor sends 'frame.copy()' from main loop.
-                        # Main loop 'frame' is native resolution (e.g. 1080p).
-                        # So scale in tracker.update should be 1.0.
-                        tracked = self._tracker.update(faces, inf_scale=1.0)
+                        # Tracker update supports multi-class with the new DeepSortTracker
+                        tracked = self._tracker.update(tracker_input, inf_scale=1.0)
                         
-                        # Apply identity logic similar to _run_inference but decoupled
                         for item in tracked:
                             track = item["track"]
-                            raw_face = item["raw_face"] 
+                            raw_data = item.get("raw_face") # This is now our dict from tracker_input
                             
-                            # Support both dict access (from msgpack) and attribute access (Face object)
-                            if isinstance(raw_face, dict):
-                                meta = raw_face.get("ident_meta")
-                            else:
-                                meta = getattr(raw_face, "ident_meta", None)
-                                
-                            # PIN IDENTITY: Only if we found a valid person (with a name)
+                            meta = raw_data.get("ident_meta") if isinstance(raw_data, dict) else None
+                            
                             if meta and meta.get("name") and meta.get("name") != "Unknown":
                                 track.pinned_identity = meta
+                                track.is_identified = meta.get("is_identified", True)
+                            
                             track.id_cache = meta
 
-                            # Signal UI listeners
-                            if meta and "aadhar" in meta:
+                            # Signal UI listeners for identified individuals
+                            if meta and meta.get("aadhar"):
                                 for l in list(self.listeners):
                                     if hasattr(l, 'on_detection'):
                                         l.on_detection({'client_id': self.client_id, 'detections': [meta]})
@@ -381,55 +399,104 @@ class Processor:
 
         return "Unknown", "Low", None
 
-    def _draw_frame(self, frame: np.ndarray, faces: List[Dict]):
+    def _draw_frame(self, frame: np.ndarray, faces: List[Dict], objects: List[Dict] = None):
         from config import VIDEO_DRAW_THICKNESS_SCALE, VIDEO_FONT_SCALE_BASE
         h, w = frame.shape[:2]
         # Responsive thickness: on 4k (3840w), thinner than 2 would be invisible.
         base_thickness = max(1, int(w / VIDEO_DRAW_THICKNESS_SCALE))
         
         # Responsive font scaling: at 1600px width, font_scale is ~1.0
-        font_scale = w / VIDEO_FONT_SCALE_BASE
-        font_scale = max(0.4, font_scale)
+        font_scale = h / 640.0 # Standardize scale to reference height
+        font_scale = max(0.4, font_scale) 
         text_thickness = max(1, int(base_thickness / 2))
 
+        # Color palette
+        COLORS = {
+            "High": (83, 83, 255),    # Terracotta/Red
+            "Medium": (0, 140, 255),  # Tactical Orange
+            "Low": (83, 222, 83),     # Safe Green
+            "Object": (255, 120, 0),  # Vivid Cyber Blue (BGR)
+            "Text": (255, 255, 255),
+            "BG": (10, 8, 5)
+        }
+
+        # 1. Draw General Objects
+        if objects:
+            for obj in objects:
+                label = obj["label"].lower()
+                
+                # Skip drawing 'person' as a generic object since it's handled in the specialized section below
+                if label == "person":
+                    continue
+
+                bbox = [int(v) for v in obj["bbox"]]
+                conf = obj.get("confidence", 0.0)
+                
+                # Draw box with responsive thickness
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), COLORS["Object"], base_thickness, cv2.LINE_4)
+                
+                # Small label
+                txt = f"{obj['label'].upper()} {int(conf*100)}%" if conf > 0 else obj['label'].upper()
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                (tw, th), bl = cv2.getTextSize(txt, font, font_scale * 0.6, text_thickness)
+                
+                lx, ly = bbox[0], bbox[1] - 5
+                if ly < th: ly = bbox[1] + th + 5
+                
+                # Background rect for readability
+                cv2.rectangle(frame, (lx, ly - th - 2), (lx + tw, ly + 2), COLORS["BG"], -1)
+                cv2.putText(frame, txt, (lx, ly), font, font_scale * 0.6, COLORS["Object"], text_thickness, cv2.LINE_4)
+
+        # 2. Draw Faces (Higher Priority)
+        # 2. Draw Active Tracks (Faces & Persons)
         for pf in faces:
             bbox = pf["bbox"]
             name = pf["name"]
             threat = pf["threat"]
+            label = pf.get("label", "face")
+            is_identified = pf.get("is_identified", False)
             
-            if threat == "High":
-                main_color = (83, 83, 255)    # Terracotta/Red
-            elif threat == "Medium":
-                main_color = (0, 140, 255)    # Tactical Orange
+            # Person tracks use larger, solid boxes. Faces use thinner accent boxes.
+            if label == "person":
+                color_map = {
+                    "High": (83, 83, 255),
+                    "Medium": (0, 140, 255),
+                    "Low": (83, 222, 83)
+                }
+                main_color = color_map.get(threat, (200, 200, 200))
+                
+                # Double thickness for identified persons
+                thickness = base_thickness + (1 if is_identified else 0)
+                
+                # Draw main body box
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, thickness, cv2.LINE_4)
+                
+                # If identified, add a status indicator
+                if is_identified:
+                    cv2.circle(frame, (bbox[0] + 15, bbox[1] + 15), 5, main_color, -1)
             else:
-                main_color = (83, 222, 83)    # Safe Green
-            text_color = (255, 255, 255)
+                # Face boxes (accents)
+                main_color = (255, 255, 255) if threat == "Low" else (83, 83, 255)
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_4)
 
-            # Draw Bounding Box - Use LINE_4 for speed over LINE_AA
-            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, base_thickness, cv2.LINE_4)
-            
-            label = f" {name.upper()} "
+            # Draw Label
+            display_name = f" {name.upper()} " if name != "Unknown" else f" {label.upper()} "
             font = cv2.FONT_HERSHEY_DUPLEX
             
-            (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+            (tw, th), baseline = cv2.getTextSize(display_name, font, font_scale, text_thickness)
             
-            # Position label: prefer above bbox, flip if off-screen top
             lx = bbox[0]
             ly = bbox[1] - base_thickness - 5
-            
             if ly < th + 5:
-                # If too high, flip inside the box at the top or just below box top
                 ly = bbox[1] + th + base_thickness + 5
             
-            # Ensure lx + tw doesn't exceed frame width
-            if lx + tw > w:
-                lx = w - tw
-            lx = max(0, lx) # Floor to 0
+            if lx + tw > w: lx = w - tw
+            lx = max(0, lx)
 
             # Draw Label Background and Text
             cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), (10, 8, 5), -1)
             cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), main_color, 1, cv2.LINE_4)
-            cv2.putText(frame, label, (lx, ly), font, font_scale, text_color, text_thickness, cv2.LINE_4)
+            cv2.putText(frame, display_name, (lx, ly), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_4)
 
     def _encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
         from config import VIDEO_JPEG_QUALITY

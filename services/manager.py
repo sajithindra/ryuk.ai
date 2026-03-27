@@ -79,7 +79,13 @@ def run_manager():
             for i, p in enumerate(processes):
                 if p.poll() is not None:
                     print(f"[!] Service {SERVICES[i]} died unexpectedly (code {p.returncode})")
-                    # Optionally restart? 
+                    print(f"[*] Restarting {SERVICES[i]}...")
+                    # Get fresh path again for safety
+                    svc = SERVICES[i]
+                    abs_path = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", svc))
+                    new_p = subprocess.Popen([python_exe, abs_path], env=env)
+                    processes[i] = new_p
+                    time.sleep(1) # Gap between restarts
             time.sleep(5)
     except Exception as e:
         print(f"Manager Error: {e}")
