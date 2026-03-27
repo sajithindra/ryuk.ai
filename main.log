@@ -3863,3 +3863,18 @@ NiceGUI ready to go on http://localhost:8000, http://192.168.1.33:8000, and http
 2026-03-24 13:37:46,745 - ryuk - INFO - [indexer.py:286] - MongoDB: Camera WORK → ['Manual'] (Source: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1)
 2026-03-24 13:37:46,751 - ryuk - INFO - [nice_gui.py:749] - UI: Manually linked camera WORK -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
 2026-03-24 13:37:51,253 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 8989988888 @ Manual
+2026-03-28 01:20:38,318 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 1 vectors for 1 identities.
+2026-03-28 01:20:39,488 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 01:20:42,030 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 1 vectors for 1 identities.
+2026-03-28 01:20:42,605 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 01:20:43,213 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 01:20:43,407 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 1 vectors for 1 identities.
+2026-03-28 01:21:08,307 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 01:30:24,933 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 01:30:25,902 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 01:30:28,270 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 01:30:29,842 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 01:30:30,001 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 01:30:32,315 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 01:30:47,343 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 01:31:11,895 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 2 vectors for 1 identities.

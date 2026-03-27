@@ -60,6 +60,10 @@ FRAME_SKIP       = INPUT_FPS // PROCESSING_FPS
 INFERENCE_THROTTLE = 1       # Process every Nth frame (Detect/Embed) relative to PROCESSING_FPS
 MAX_INFERENCE_SIZE = 640     # Optimal for TensorRT/InsightFace
 
+# Detection Throttling (for "Detect Once and Track")
+DETECTION_INTERVAL = 5       # Run detector every N frames. Track in between.
+TRACKING_ONLY_ENABLED = True  # Enable Kalman-based tracking prediction between detections
+
 # DeepSORT Tracking
 TRACKER_MAX_AGE = 300         # Sustained for 10s at 30fps
 TRACKER_N_INIT  = 1          # Show face boxes immediately (1 frame to confirm)

@@ -17,7 +17,8 @@ from core.ai_processor import face_app
 from core.state import cache
 import core.serialization as serde
 import core.watchdog_indexer as watchdog
-from config import FAISS_THRESHOLD, AI_BATCH_SIZE
+from core.deep_sort import DeepSortTracker
+from config import FAISS_THRESHOLD, AI_BATCH_SIZE, DETECTION_INTERVAL, TRACKING_ONLY_ENABLED
 
 class UnifiedInferenceEngine:
     """
@@ -30,6 +31,11 @@ class UnifiedInferenceEngine:
         self.log("[UnifiedEngine] Initialized and connected to GlobalAIProcessor.")
         self._decoders = {} # client_id -> JpegBatchDecoder
         self._decoder_lock = threading.Lock()
+        
+        # Per-client tracking state
+        self.trackers = {} # client_id -> DeepSortTracker
+        self.frame_counts = {} # client_id -> int (frames since last detect)
+        self._tracker_lock = threading.Lock()
 
     def _get_decoder(self, client_id, first_frame_raw):
         with self._decoder_lock:
@@ -98,57 +104,74 @@ class UnifiedInferenceEngine:
         
         start_time = time.time()
         
-        # 1. AI Inference (Batched internally by GlobalAIProcessor)
-        res = face_app.get(frame)
-        
-        # Handle Inference Timeout or Error
-        if res is None:
-            self.log("[UnifiedEngine] WARNING: Inference returned None (timeout/error)")
-            return None
+        # 1. State Management
+        with self._tracker_lock:
+            if client_id not in self.trackers:
+                self.trackers[client_id] = DeepSortTracker()
+                self.frame_counts[client_id] = 0
             
-        faces = res.get("faces", []) or []
+            tracker = self.trackers[client_id]
+            self.frame_counts[client_id] += 1
+            
+            # Decide: run detection or only track?
+            run_detection = False
+            if not TRACKING_ONLY_ENABLED:
+                run_detection = True
+            elif self.frame_counts[client_id] >= DETECTION_INTERVAL:
+                run_detection = True
+            elif not tracker.tracks:
+                run_detection = True
         
-        # 2. FAISS Search & Recognition
+        faces = []
         search_results = []
-        try:
-            # Final safety check: ensure faces is a list and contains only valid items
-            if faces is None: faces = []
+        
+        if run_detection:
+            # Full Detection & Recognition Path
+            res = face_app.get(frame)
+            if res:
+                detected_faces = res.get("faces", []) or []
+                tracker.predict() # Always predict before update
+                tracker.update(detected_faces)
+                self.frame_counts[client_id] = 0
+                # self.log(f"[UnifiedEngine] Full Detection for {client_id}")
+            else:
+                self.log("[UnifiedEngine] WARNING: Inference returned None")
+        else:
+            # Efficient Tracking-Only Path
+            tracker.predict()
+            # Age tracks even if not updating with detections
+            tracker.update([]) 
+            # self.log(f"[UnifiedEngine] Tracking Only for {client_id}")
             
-            for face in faces:
-                if face is None:
+        # 2. Extract Results from Tracker (Common for both paths)
+        active_tracks = [t for t in tracker.tracks.values() if t.state == 1 or t.hits > 0]
+        
+        for track in active_tracks:
+            # Convert track back to a format downstream expects
+            # We use a dummy Face-like dict for compatibility
+            face_data = {
+                "bbox": track.smoothed_bbox,
+                "track_id": track.track_id,
+                "det_score": 1.0 if not run_detection else 0.9, # Tracker confidence
+                "embedding": track.face_embedding
+            }
+            faces.append(face_data)
+            
+            # Identification Persistence
+            if track.pinned_identity:
+                search_results.append(track.pinned_identity)
+            elif track.face_embedding is not None:
+                # Need to recognize
+                try:
+                    context = {"pose": [0,0,0], "norm": 30.0}
+                    ident = watchdog.recognize_face(track.face_embedding, threshold=FAISS_THRESHOLD, context=context)
+                    if ident and ident.get("name") != "Unknown":
+                        track.pinned_identity = ident # Cache it!
+                    search_results.append(ident if ident else {"name": "Unknown", "threat_level": "Low"})
+                except:
                     search_results.append({"name": "Unknown", "threat_level": "Low"})
-                    continue
-                    
-                emb = getattr(face, 'embedding', None)
-                if emb is None:
-                    search_results.append({"name": "Unknown", "threat_level": "Low"})
-                    continue
-                    
-                context = {
-                    "pose": [float(p) for p in (getattr(face, "pose", [0,0,0]) or [0,0,0])],
-                    "norm": 30.0
-                }
-                
-                # Ensure we have a valid norm (either from insightface or GlobalAIProcessor)
-                f_norm = getattr(face, 'norm', None)
-                if f_norm is not None:
-                    if hasattr(f_norm, 'item'):
-                        f_norm = f_norm.item()
-                    context["norm"] = float(f_norm)
-                else:
-                    # Fallback if norm is missing but det_score exists
-                    det_s = getattr(face, "det_score", 0.9)
-                    if hasattr(det_s, 'item'): det_s = det_s.item()
-                    context["norm"] = float(det_s) * 30.0
-                
-                ident = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD, context=context)
-                search_results.append(ident if ident else {"name": "Unknown", "threat_level": "Low"})
-        except Exception as e:
-            import traceback
-            self.log(f"CRITICAL ERROR in Recognition Loop: {e}\n{traceback.format_exc()}")
-            # Ensure search_results is populated even if loop fails partially
-            while len(search_results) < len(faces):
-                search_results.append({"name": "ERROR", "threat_level": "High"})
+            else:
+                search_results.append({"name": "Unknown", "threat_level": "Low"})
         
         latency = (time.time() - start_time) * 1000
         
@@ -157,9 +180,10 @@ class UnifiedInferenceEngine:
             "client_id": client_id,
             "frame_count": packet.get('frame_count', 0),
             "timestamp": packet.get('timestamp', time.time()),
-            "faces": faces,  # Original detections for drawing
-            "recognition": search_results, # Recognition results
-            "latency": latency
+            "faces": faces,
+            "recognition": search_results,
+            "latency": latency,
+            "is_tracked": not run_detection
         }
         
         return result_packet
