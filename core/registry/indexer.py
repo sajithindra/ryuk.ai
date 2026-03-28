@@ -268,7 +268,7 @@ class WatchdogIndexer:
             logger.info(f"Watchdog: Logged {aadhar} @ {location}")
         except Exception as e: logger.error(f"Watchdog: Log failed — {e}")
 
-    def update_last_activity_duration(self, aadhar: str, client_id: str, duration: float):
+    def finalize_activity_session(self, aadhar: str, client_id: str, duration: float):
         """Updates the most recent log for this person with their final stay duration."""
         if self._activity_col is None: return
         try:

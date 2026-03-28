@@ -4087,3 +4087,54 @@ NiceGUI ready to go on http://localhost:8000, http://192.168.1.33:8000, and http
 2026-03-28 11:32:51,723 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
 2026-03-28 11:32:52,339 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
 2026-03-28 11:32:52,507 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 13:10:24,853 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 13:10:25,897 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 13:10:28,263 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 13:10:28,275 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 13:10:31,485 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 13:10:31,677 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 13:11:01,643 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 13:11:01,754 - ryuk.gst - INFO - [gst_engine.py:79] - GstEngine (FRONT_DOOR) — Pipeline started for rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 13:11:05,902 - ryuk - INFO - [indexer.py:309] - MongoDB: Deleted Camera FRONT_DOOR
+2026-03-28 13:11:10,713 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 13:11:15,203 - ryuk - INFO - [discovery.py:81] - Discovery: Found 33 potential RTSP devices across all interfaces.
+2026-03-28 13:26:02,194 - ryuk - INFO - [discovery.py:81] - Discovery: Found 0 potential RTSP devices across all interfaces.
+2026-03-28 13:26:14,160 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 13:26:17,029 - ryuk - INFO - [discovery.py:81] - Discovery: Found 0 potential RTSP devices across all interfaces.
+2026-03-28 13:26:50,044 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 13:26:51,726 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 13:26:58,462 - ryuk - INFO - [discovery.py:81] - Discovery: Found 39 potential RTSP devices across all interfaces.
+2026-03-28 13:26:58,462 - ryuk - ERROR - [nice_gui.py:782] - Discovery Error: The client this element belongs to has been deleted.
+2026-03-28 13:27:03,963 - ryuk - INFO - [discovery.py:81] - Discovery: Found 35 potential RTSP devices across all interfaces.
+2026-03-28 13:27:03,964 - ryuk - ERROR - [nice_gui.py:782] - Discovery Error: The client this element belongs to has been deleted.
+2026-03-28 13:27:26,092 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 13:27:26,868 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 13:27:29,181 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 13:27:36,186 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 13:27:36,347 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 13:27:37,669 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 13:27:40,724 - ryuk - INFO - [discovery.py:81] - Discovery: Found 0 potential RTSP devices across all interfaces.
+2026-03-28 13:28:50,551 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 13:28:56,398 - ryuk - INFO - [discovery.py:81] - Discovery: Found 26 potential RTSP devices across all interfaces.
+2026-03-28 14:39:54,233 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.2.0/24) for ports 554,8554,10554,6554...
+2026-03-28 14:39:58,058 - ryuk - INFO - [discovery.py:81] - Discovery: Found 34 potential RTSP devices across all interfaces.
+2026-03-28 18:03:01,315 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 18:03:02,235 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 18:03:04,527 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 18:03:07,529 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 18:03:07,695 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 6 vectors for 1 identities.
+2026-03-28 18:03:31,417 - ryuk - INFO - [discovery.py:39] - Discovery: Scanning wlp4s0 (192.168.1.0/24) for ports 554,8554,10554,6554...
+2026-03-28 18:03:33,791 - ryuk - INFO - [discovery.py:81] - Discovery: Found 1 potential RTSP devices across all interfaces.
+2026-03-28 18:03:58,314 - ryuk - INFO - [indexer.py:316] - MongoDB: Camera FRONT_END → ['Manual'] (Source: rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1)
+2026-03-28 18:03:58,320 - ryuk - INFO - [nice_gui.py:862] - UI: Manually linked camera FRONT_END -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 18:03:58,502 - ryuk.gst - INFO - [gst_engine.py:79] - GstEngine (FRONT_END) — Pipeline started for rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 18:04:00,016 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 18:15:27,767 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 18:17:59,191 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 7 vectors for 1 identities.
+2026-03-28 18:18:00,091 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 18:18:02,501 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 7 vectors for 1 identities.
+2026-03-28 18:18:04,662 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 18:18:04,814 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 7 vectors for 1 identities.
+2026-03-28 18:18:05,102 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_END -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 18:18:05,154 - ryuk.gst - INFO - [gst_engine.py:79] - GstEngine (FRONT_END) — Pipeline started for rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 18:18:06,625 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
