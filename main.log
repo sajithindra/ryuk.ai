@@ -3878,3 +3878,212 @@ NiceGUI ready to go on http://localhost:8000, http://192.168.1.33:8000, and http
 2026-03-28 01:30:32,315 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
 2026-03-28 01:30:47,343 - ryuk - INFO - [indexer.py:260] - Watchdog: Logged 3434 3443 4343 @ Manual
 2026-03-28 01:31:11,895 - ryuk - INFO - [indexer.py:146] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:03:13,325 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:03:14,433 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:03:17,134 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:03:17,551 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:03:20,474 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:03:20,652 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:04:30,028 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:04:31,018 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:04:32,405 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:04:33,382 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:04:34,105 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:04:34,258 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:06:12,967 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:06:13,762 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:06:15,311 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:06:16,131 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:06:16,450 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:06:16,624 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 2 vectors for 1 identities.
+2026-03-28 03:06:19,566 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:09:35,748 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:09:36,727 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:09:39,133 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:09:39,815 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:09:39,980 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:09:40,967 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:09:44,980 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:12:13,413 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:12:14,351 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:12:16,381 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:12:16,783 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:12:17,400 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:12:17,564 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:12:20,714 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:13:45,574 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:13:46,555 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:13:48,952 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:13:49,565 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:13:49,719 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:13:49,804 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:14:20,759 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:15:07,808 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:15:12,027 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:15:12,203 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:15:20,072 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:15:21,054 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:15:23,287 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:15:23,488 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:15:24,231 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:15:24,403 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:17:31,334 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:17:32,295 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:17:34,610 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:17:34,677 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:17:34,681 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:17:35,280 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:17:35,445 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:18:21,632 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:18:22,642 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:18:24,310 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:18:24,995 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:18:25,819 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:18:25,983 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:19:34,712 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:20:36,906 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:20:38,052 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:20:40,384 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:20:41,254 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:20:41,441 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:20:42,357 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:21:34,748 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:22:13,155 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:22:58,605 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:22:59,566 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:23:01,349 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:23:01,954 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:23:02,732 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:23:02,894 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:23:34,786 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:25:34,866 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:26:21,017 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:26:21,985 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:26:23,367 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:26:24,350 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:26:25,070 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:26:25,236 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:26:42,777 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:26:43,644 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:26:46,056 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:26:46,461 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:26:46,611 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:26:46,625 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:30:43,187 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:30:44,017 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:30:46,357 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:30:46,400 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:30:46,403 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:30:46,696 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:30:46,858 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:32:46,470 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:34:46,552 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:35:01,831 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:35:02,815 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:35:05,161 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:35:05,204 - ryuk - INFO - [nice_gui.py:441] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:35:05,907 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:35:06,075 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:36:46,606 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:37:58,330 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:37:59,326 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 03:38:00,871 - ryuk - INFO - [nice_gui.py:440] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 03:38:01,706 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:38:02,416 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 03:38:02,577 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 03:38:46,672 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 03:39:47,205 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:03:06,645 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:03:07,554 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:03:09,743 - ryuk - INFO - [nice_gui.py:441] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:03:09,940 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:03:10,479 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:03:10,630 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:03:13,956 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:04:44,144 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:04:45,125 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:04:47,514 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:04:48,102 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:04:48,254 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 3 vectors for 1 identities.
+2026-03-28 04:04:48,487 - ryuk - INFO - [nice_gui.py:441] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:05:13,969 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:09:24,484 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:09:25,410 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:09:27,478 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:09:27,791 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:09:28,513 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:09:28,695 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:09:38,613 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:11:38,683 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:13:38,707 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:15:38,756 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:17:15,275 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:17:16,215 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:17:18,624 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:17:19,449 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:17:19,630 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:17:22,134 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:17:38,821 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:22:03,752 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:22:30,392 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:22:31,306 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:22:33,690 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:22:34,342 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:22:34,498 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:22:35,709 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:22:40,091 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:24:09,477 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:24:10,304 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:24:12,666 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:24:12,849 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:24:12,987 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:24:15,981 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:24:40,105 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:27:12,324 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:28:16,390 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:28:17,329 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:28:19,685 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:28:19,787 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:28:20,303 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:28:20,470 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:28:23,502 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 04:37:43,420 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:37:44,322 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:37:46,685 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:37:47,169 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:37:47,313 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:37:47,962 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 04:47:01,928 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:47:02,899 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 04:47:05,311 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:47:05,937 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 04:47:06,119 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 04:47:10,349 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 11:24:16,106 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:24:17,121 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 11:24:19,514 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:24:22,718 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 11:24:22,888 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:24:36,872 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 11:28:50,253 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:28:53,608 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 11:28:53,764 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:29:05,574 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:29:06,467 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 11:29:08,847 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:29:09,230 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 11:29:09,398 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 4 vectors for 1 identities.
+2026-03-28 11:29:11,012 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 11:29:11,088 - ryuk.gst - INFO - [gst_engine.py:80] - GstEngine (FRONT_DOOR) — Pipeline started for rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 11:29:13,070 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 11:29:32,422 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 11:29:39,614 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 11:29:39,780 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 11:32:48,415 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 11:32:49,334 - ryuk - INFO - [database.py:27] - MongoDB: Database and indexes initialized.
+2026-03-28 11:32:51,415 - ryuk - INFO - [nice_gui.py:442] - UI: Initialized session for FRONT_DOOR -> rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 11:32:51,502 - ryuk.gst - INFO - [gst_engine.py:79] - GstEngine (FRONT_DOOR) — Pipeline started for rtsp://admin:L2577636@192.168.1.34:554/cam/realmonitor?channel=1&subtype=1
+2026-03-28 11:32:51,719 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.
+2026-03-28 11:32:51,723 - ryuk - INFO - [indexer.py:268] - Watchdog: Logged 3434 3443 4343 @ Manual
+2026-03-28 11:32:52,339 - ryuk - INFO - [engine.py:70] - [IO BINDING] Enabled for Face Detection
+2026-03-28 11:32:52,507 - ryuk - INFO - [indexer.py:149] - FAISS: Loaded 5 vectors for 1 identities.

@@ -253,9 +253,76 @@ def inject_styles():
                 opacity: 1;
                 transform: scale(1.1);
             }}
+            .q-notification {{
+                background: rgba(12, 14, 22, 0.9) !important;
+                backdrop-filter: blur(35px) saturate(200%);
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                border-radius: 12px !important;
+                box-shadow: 0 15px 50px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+                padding: 18px 22px !important;
+                min-width: 400px !important;
+                z-index: 9999 !important;
+            }}
+            .q-notification__message {{
+                font-family: 'Outfit', sans-serif !important;
+                font-size: 1.05rem !important;
+                letter-spacing: 0.5px;
+                color: #fff;
+                line-height: 1.4 !important;
+            }}
+            .q-notification__message b {{
+                color: var(--text);
+                text-transform: uppercase;
+                letter-spacing: 1.5px;
+                font-weight: 800;
+            }}
+            .q-notification__caption {{
+                font-family: 'JetBrains Mono', monospace !important;
+                font-size: 0.75rem !important;
+                opacity: 0.8 !important;
+                letter-spacing: 1px !important;
+                margin-top: 4px !important;
+            }}
+            .q-notification__icon {{
+                font-size: 32px !important;
+                margin-right: 16px !important;
+            }}
+            
+            /* Action Button (Close Icon) Styling */
+            .q-notification__actions .q-btn {{
+                color: rgba(255,255,255,0.6) !important;
+                transition: all 0.3s ease;
+            }}
+            .q-notification__actions .q-btn:hover {{
+                color: #fff !important;
+                transform: rotate(90deg) scale(1.1);
+            }}
+            
+            /* High Security Pulsing Aura */
+            @keyframes alert-pulse {{
+                0% {{ border-color: rgba(255, 51, 51, 0.4); box-shadow: 0 0 15px rgba(255, 51, 51, 0.2); }}
+                50% {{ border-color: rgba(255, 51, 51, 1); box-shadow: 0 0 40px rgba(255, 51, 51, 0.5); }}
+                100% {{ border-color: rgba(255, 51, 51, 0.4); box-shadow: 0 0 15px rgba(255, 51, 51, 0.2); }}
+            }}
+            .q-notification--negative {{
+                border: 2px solid #FF3333 !important;
+                animation: alert-pulse 2s infinite ease-in-out !important;
+            }}
+            .q-notification--negative .q-notification__icon {{
+                color: #FF3333 !important;
+                filter: drop-shadow(0 0 12px rgba(255, 51, 51, 0.8));
+            }}
+            
+            /* Standard Intel Accent */
+            .q-notification:not(.q-notification--negative) {{
+                border-left: 6px solid var(--primary) !important;
+            }}
         </style>
     """)
 
 def get_threat_color(threat: str) -> str:
-    """Returns the CSS color for a given threat level."""
-    return 'red' if threat == 'High' else 'orange' if threat == 'Medium' else '#53DE53'
+    """Returns the CSS color for a given threat level (case-insensitive)."""
+    t = threat.lower()
+    if t in ["high", "critical", "danger"]: return 'red'
+    if t in ["medium", "warning", "caution"]: return 'orange'
+    return '#53DE53' # Low/Standard success green

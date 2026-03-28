@@ -37,14 +37,14 @@ IDENTITIES_PKL = os.path.join(DATA_DIR, "identities.pkl")
 FAISS_THRESHOLD       = 0.40   # Base threshold for recognition
 ADAPTIVE_THRESHOLD_ENABLED = True
 ADAPTIVE_MIN_THRESHOLD = 0.35  # Never go below this (too sensitive)
-ADAPTIVE_MAX_THRESHOLD = 0.60  # Never go above this (too conservative)
+ADAPTIVE_MAX_THRESHOLD = 0.48  # Lowered from 0.60 for stricter matching
 SCORE_HISTORY_SIZE     = 100   # Sliding window for distribution tracking
 
 MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
 FACE_MAX_INACTIVE_S   = 3.0    # Remove unidentified face box after 3s without detection
-FACE_PINNED_MAX_INACTIVE_S = 30.0 # Keep identified person track for 30s
+FACE_PINNED_MAX_INACTIVE_S = 10.0 # Lowered from 30.0 to fix ghost detections
 FACE_TRACK_MAX_DIST   = 400    # Increased for fast movement and head twists
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
 
@@ -113,5 +113,5 @@ POLL_INTERVAL_MS   = 100
 ALERT_INTERVAL_MS  = 100
 CLEANUP_INTERVAL_MS = 1000
 HEALTH_INTERVAL_MS = 3000
-INTEL_CLEANUP_S    = 5.0   # Remove intel card if person unseen for N seconds
+INTEL_CLEANUP_S    = 10.0  # Remove intel card if person unseen for N seconds
 INTEL_PANEL_WIDTH  = 320

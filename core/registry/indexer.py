@@ -41,6 +41,7 @@ class WatchdogIndexer:
         self._profiles_col  = None
         self._cameras_col   = None
         self._activity_col  = None
+        self._aadhar_to_meta: dict[str, dict] = {}
         self._connect_db()
         self._migrate_pickle()
         self._migrate_embeddings_schema()
@@ -140,6 +141,8 @@ class WatchdogIndexer:
 
         with self._lock:
             self._faiss_index, self._faiss_mapping = cpu_idx, mapping
+            # Build O(1) lookup table for current metadata
+            self._aadhar_to_meta = {m["aadhar"]: m for m in mapping}
         
         try: cache.set("ryuk:index:version", str(time.time()))
         except Exception: pass
@@ -212,6 +215,11 @@ class WatchdogIndexer:
             logger.debug(f"BIO-LOG: Score: {score:.3f} | Threshold: {current_threshold:.3f} | {'MATCH' if result and result.get('aadhar') else 'REJECT'}")
         return result
 
+    def get_metadata(self, aadhar: str) -> dict | None:
+        """High-speed O(1) metadata lookup from the current index mapping."""
+        with self._lock:
+            return self._aadhar_to_meta.get(aadhar)
+
     def _calculate_adaptive_threshold(self, context: dict | None = None) -> float:
         base_threshold = FAISS_THRESHOLD
         if not ADAPTIVE_THRESHOLD_ENABLED: return base_threshold
@@ -259,6 +267,28 @@ class WatchdogIndexer:
             cache_str.setex(cooldown_key, int(LOG_COOLDOWN_S), "1")
             logger.info(f"Watchdog: Logged {aadhar} @ {location}")
         except Exception as e: logger.error(f"Watchdog: Log failed — {e}")
+
+    def update_last_activity_duration(self, aadhar: str, client_id: str, duration: float):
+        """Updates the most recent log for this person with their final stay duration."""
+        if self._activity_col is None: return
+        try:
+            # ROBUST QUERY: Try exact match first, then fall back to absolute latest for this subject
+            query = {"aadhar": aadhar, "client_id": client_id}
+            last_log = self._activity_col.find_one(query, sort=[("timestamp", -1)])
+            
+            if not last_log:
+                # FALLBACK: Just find the most recent log for this Aadhar (any camera)
+                last_log = self._activity_col.find_one({"aadhar": aadhar}, sort=[("timestamp", -1)])
+                
+            if last_log:
+                # Store duration in seconds
+                self._activity_col.update_one(
+                    {"_id": last_log["_id"]},
+                    {"$set": {"duration": duration}}
+                )
+                logger.debug(f"Watchdog: Updated duration for {aadhar} ({duration:.1f}s)")
+        except Exception as e:
+            logger.error(f"Watchdog: Duration update failed — {e}")
 
     def get_activity_report(self, aadhar: str, limit: int = 50,
                             days_ago: int | None = None) -> list[dict]:

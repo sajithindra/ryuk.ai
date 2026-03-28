@@ -83,7 +83,7 @@ def run_sink_service():
                 if aadhar:
                     # Publish to real-time feed for dashboard
                     msg_data = {
-                        "type": "SECURITY_ALERT" if threat == "High" else "INTEL_UPDATE",
+                        "type": "SECURITY_ALERT" if threat.lower() in ["high", "medium", "critical"] else "INTEL_UPDATE",
                         "message": f"{name} identified at {client_id}",
                         "name": name,
                         "aadhar": aadhar,
@@ -92,11 +92,12 @@ def run_sink_service():
                         "timestamp": time.time(),
                     }
                     
-                    # High priority alerts get published immediately (with cooldown)
-                    if threat == "High":
+                    # High/Medium/Critical priority alerts get published immediately (with cooldown)
+                    if threat.lower() in ["high", "medium", "critical"]:
                         alert_lock = f"alert_lock:{aadhar}:{client_id}"
                         if not cache_str.get(alert_lock):
                             cache.publish("security_alerts", json.dumps(msg_data))
+                            # Slightly faster cooldown for Medium if needed, but keeping consistent for now
                             cache_str.set(alert_lock, "1", ex=int(ALERT_COOLDOWN_S))
                     else:
                         # Normal intelligence updates

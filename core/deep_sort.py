@@ -64,8 +64,7 @@ class DeepSortTrack:
         self.raw_face = raw_face
         self.hits = 1
         self.state = 0 # 0: Tentative, 1: Confirmed, 2: Deleted
-        self.pinned_identity = None
-        self.id_cache = None
+        self.identity_id = None # Pinned Aadhar ID (identifier only)
         
         self.time_since_update = 0
         
@@ -129,7 +128,7 @@ class DeepSortTrack:
         
         # If we have a pinned identity, we allow the track to stay longer (e.g. 60s)
         # to survive long occlusions or bad angles without losing the person.
-        threshold = FACE_PINNED_MAX_INACTIVE_S if self.pinned_identity else FACE_MAX_INACTIVE_S
+        threshold = FACE_PINNED_MAX_INACTIVE_S if self.identity_id else FACE_MAX_INACTIVE_S
         return elapsed > threshold
 
     @property

@@ -48,6 +48,12 @@ if ! python3 -m venv --help &> /dev/null; then
     exit 1
 fi
 
+# Check for GObject introspection development headers
+if ! dpkg -l | grep -E "libgirepository-?1\.0-dev" &> /dev/null; then
+    echo -e "${YELLOW}Warning: libgirepository1.0-dev is missing. It is required for GStreamer support.${NC}"
+    echo -e "You can install it with: sudo apt install libgirepository1.0-dev libcairo2-dev pkg-config"
+fi
+
 # 2. Virtual Environment Setup
 echo -e "\n${GREEN}[2/6] Setting up virtual environment...${NC}"
 if [ -d ".venv" ]; then

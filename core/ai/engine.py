@@ -139,7 +139,7 @@ class GlobalAIProcessor:
                     if not faces: continue
                     
                     # Batched alignment for this frame's faces
-                    frame_gpu = torch.from_numpy(np.ascontiguousarray(frame)).to('cuda', non_blocking=True).permute(2, 0, 1).float().unsqueeze(0)
+                    frame_gpu = torch.from_numpy(np.ascontiguousarray(frame).copy()).to('cuda', non_blocking=True).permute(2, 0, 1).float().unsqueeze(0)
                     lms_gpu = torch.from_numpy(np.array([f.kps for f in faces])).to('cuda', non_blocking=True).float()
                     chips = self.aligner.align_batched(frame_gpu, lms_gpu, torch.zeros(len(faces), dtype=torch.long, device='cuda'))
                     chips_np = chips.permute(0, 2, 3, 1).byte().cpu().numpy()

@@ -21,17 +21,26 @@ class IntelPanelItem(ui.row):
         with self:
             ui.avatar('person', color='transparent').classes('border border-white/10').style(f'background-color: {SURFACE_COLOR}; color: white')
             with ui.column().classes('gap-0 grow'):
-                ui.label(name).classes('font-black text-xs')
+                self.name_label = ui.label(name).classes('font-black text-xs uppercase')
                 self.source_label = ui.label(camera).classes('text-[10px] font-mono opacity-40')
                 with ui.row().classes('items-center gap-2 mt-1'):
                     self.threat_badge = ui.badge(threat.upper()).props(f'color={threat_color} size=xs').classes('text-[10px] px-2')
             
             with ui.column().classes('items-end gap-1 shrink-0'):
-                self.count_label = ui.label("×1").classes('text-[13px] font-black text-orange-500 opacity-80')
-                self.time_label = ui.label("just now").classes('text-[10px] font-bold opacity-20')
+                self.time_label = ui.label("just now").classes('text-[10px] font-bold opacity-30 tracking-wider uppercase')
     
-    def update_count(self, count: int, camera: str = None):
-        self.count_label.set_text(f"×{count}")
+    def update_metadata(self, metadata: dict):
+        """Syncs the latest identity metadata (threat level, name, source)."""
+        name = metadata.get('name', 'Unknown')
+        camera = metadata.get('source', '')
+        threat = metadata.get('threat_level', 'Low')
+        threat_color = get_threat_color(threat)
+        
+        # In-place updates to avoid recreating layout
+        self.name_label.set_text(name)
         self.time_label.set_text("just now")
-        if camera:
-            self.source_label.set_text(camera)
+        self.source_label.set_text(camera)
+        
+        # Update badge
+        self.threat_badge.set_text(threat.upper())
+        self.threat_badge.props(f'color={threat_color}')

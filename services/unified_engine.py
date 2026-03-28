@@ -157,16 +157,22 @@ class UnifiedInferenceEngine:
             }
             faces.append(face_data)
             
-            # Identification Persistence
-            if track.pinned_identity:
-                search_results.append(track.pinned_identity)
+            # Identification Persistence (Dynamic Lookup)
+            if track.identity_id:
+                # Fetch latest metadata from WatchdogIndexer
+                latest_meta = watchdog.get_metadata(track.identity_id)
+                if latest_meta:
+                    search_results.append(latest_meta)
+                else:
+                    # Profile might have been deleted, fallback
+                    search_results.append({"name": "Unknown", "threat_level": "Low"})
             elif track.face_embedding is not None:
                 # Need to recognize
                 try:
                     context = {"pose": [0,0,0], "norm": 30.0}
                     ident = watchdog.recognize_face(track.face_embedding, threshold=FAISS_THRESHOLD, context=context)
-                    if ident and ident.get("name") != "Unknown":
-                        track.pinned_identity = ident # Cache it!
+                    if ident and ident.get("aadhar") and ident.get("aadhar") != "Unknown":
+                        track.identity_id = ident["aadhar"] # Pin the ID, not the whole dict
                     search_results.append(ident if ident else {"name": "Unknown", "threat_level": "Low"})
                 except:
                     search_results.append({"name": "Unknown", "threat_level": "Low"})

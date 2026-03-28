@@ -24,7 +24,7 @@ from core.server import app as streaming_app, server as ws_server
 from core.watchdog_indexer import (
     get_all_profiles, delete_profile, update_profile, 
     enroll_face, get_activity_report, delete_camera,
-    register_camera_metadata, get_profile
+    register_camera_metadata, get_profile, finalize_activity_session
 )
 from core.agent import ryuk_agent
 from core.discovery import discover_cameras
@@ -58,9 +58,11 @@ class NiceDashboard:
         self.ip_address = ip_address
         self.server_port = SERVER_PORT
         self.intel_cards: Dict[str, dict] = {} 
+        self.track_identities: Dict[tuple, str] = {} # (client_id, track_id) -> aadhar
         self.intel_last_seen: Dict[str, float] = {} 
-        self.intel_counts: Dict[str, int] = {} 
         self.intel_is_active: Dict[str, bool] = {} 
+        self.profile_refresh_cache: Dict[str, float] = {} # aadhar -> last_db_refresh_time
+        self.intel_start_times: Dict[str, float] = {} # aadhar -> session_start_time
         self.intel_elements: Dict[str, IntelPanelItem] = {} 
         
         self.redis_healthy = False
@@ -457,11 +459,63 @@ class NiceDashboard:
         
         for aadhar in to_remove:
             if aadhar in self.intel_elements:
+                # 1. Finalize the duration before cleaning up
+                start_time = self.intel_start_times.get(aadhar)
+                if start_time:
+                    duration = now - start_time
+                    # Get the source from the last detection if possible
+                    # Since we're in the UI, we can call the indexer directly
+                    # If we don't know the exact client_id, the indexer will find the most recent
+                    # but let's try to be accurate.
+                    last_source = "Unknown"
+                    if aadhar in self.intel_cards:
+                        last_source = self.intel_cards[aadhar].get('source', 'Unknown')
+                    
+                    import core.watchdog_indexer as watchdog
+                    watchdog.finalize_activity_session(aadhar, last_source, duration)
+
                 self.intel_elements[aadhar].delete()
                 del self.intel_elements[aadhar]
             if aadhar in self.intel_last_seen: del self.intel_last_seen[aadhar]
-            if aadhar in self.intel_counts: del self.intel_counts[aadhar]
             if aadhar in self.intel_is_active: del self.intel_is_active[aadhar]
+            if aadhar in self.intel_start_times: del self.intel_start_times[aadhar]
+
+    def _dispatch_notification(self, data: dict):
+        """Unified point for all system notifications."""
+        msg_type = data.get('type', 'INTEL_UPDATE')
+        name = data.get('name', 'Unknown Subject')
+        source = data.get('source', 'Unknown Camera').replace('_', ' ').title()
+        threat_lv = data.get('threat_level', 'Low').upper()
+        
+        if msg_type == "SECURITY_ALERT":
+            # ONLY show popups for High/Critical threat levels
+            if threat_lv not in ['HIGH', 'CRITICAL']:
+                return 
+            
+            # Tactical Alert: Higher severity
+            notice_type = 'negative'
+            self.ui_queue.put(lambda n=name, s=source, t=threat_lv, v=notice_type: ui.notify(
+                f"<b>ENTRY DETECTED: {n}</b>",
+                caption=f"LOCATION: {s} | PRIORITY: {t}",
+                type=v,
+                icon='security',
+                html=True,
+                actions=[{'icon': 'close', 'color': 'white'}],
+                timeout=0, # Persistent for security
+                position='top-right'
+            ))
+        else:
+            # Standard Intelligence Update: Lower severity
+            self.ui_queue.put(lambda n=name, s=source: ui.notify(
+                f"<b>INTEL: {n}</b>",
+                caption=f"SIGHTING AT {s}",
+                color=PRIMARY_COLOR,
+                icon='info_outline',
+                html=True,
+                actions=[{'icon': 'close', 'color': 'white'}],
+                timeout=4,
+                position='top-right'
+            ))
 
     async def _subscribe_alerts(self):
         try:
@@ -471,8 +525,11 @@ class NiceDashboard:
                 msg = await asyncio.to_thread(pubsub.get_message, ignore_subscribe_messages=True, timeout=1.0)
                 if msg:
                     data = json.loads(msg['data'])
+                    # 1. Update the sidebar Intel panel
                     self.ui_queue.put(lambda d=data: self._update_intel(d))
-                await asyncio.sleep(0.01)
+                    # 2. Dispatch a browser notification
+                    self._dispatch_notification(data)
+                    
         except Exception as e:
             print(f"DEBUG: Alert subscriber error: {e}")
 
@@ -480,26 +537,36 @@ class NiceDashboard:
         aadhar = metadata.get('aadhar')
         if not aadhar: return
         
-        camera = metadata.get('source', '')
         now = time.time()
         
-        # === COOLDOWN: only increment counter max once every 3 seconds per person ===
-        last_update = self.intel_last_seen.get(aadhar, 0)
-        if aadhar in self.intel_elements and (now - last_update) < 3.0:
-            return  # Suppress rapid-fire duplicates; card already exists and was updated recently
-        
-        # Deduplication and counters - keyed by aadhar so each person shows only once
+        # Sync last seen & start time
         self.intel_last_seen[aadhar] = now
-        self.intel_counts[aadhar] = self.intel_counts.get(aadhar, 0) + 1
-        self.intel_is_active[aadhar] = True
+        if aadhar not in self.intel_start_times:
+            self.intel_start_times[aadhar] = now
+        
+        # Save last known metadata for cleanup reference
+        self.intel_cards[aadhar] = metadata
+        
+        # REAL-TIME SYNC: Refresh identity metadata (name, threat) from DB every 5s
+        last_refresh = self.profile_refresh_cache.get(aadhar, 0)
+        if now - last_refresh > 5.0:
+            try:
+                profile = get_profile(aadhar)
+                if profile:
+                    # Merge DB truth into the detection metadata
+                    metadata['name'] = profile.get('name', metadata.get('name', 'Unknown'))
+                    metadata['threat_level'] = profile.get('threat_level', metadata.get('threat_level', 'Low'))
+                    self.profile_refresh_cache[aadhar] = now
+            except Exception as e:
+                logger.error(f"UI: Profile sync failed for {aadhar} — {e}")
         
         if aadhar not in self.intel_elements:
             with self.intel_container:
                 item = IntelPanelItem(metadata).on('click', lambda a=aadhar: self._show_activity_tracking(a))
                 self.intel_elements[aadhar] = item
         else:
-            # Update the existing card instead of adding a new one
-            self.intel_elements[aadhar].update_count(self.intel_counts[aadhar], camera)
+            # Fully sync the card (including threat level and name)
+            self.intel_elements[aadhar].update_metadata(metadata)
 
     def _show_activity_tracking(self, aadhar: str):
         profile = get_profile(aadhar) or {}
@@ -527,10 +594,29 @@ class NiceDashboard:
                             ui.element('div').classes('absolute left-[33px] top-4 bottom-4 w-px bg-white/10')
                             
                             for i, log in enumerate(logs):
-                                ts = log.get('timestamp', '')
-                                ts_str = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
-                                time_val = ts_str[11:16] if len(ts_str) > 15 else ts_str
-                                date_val = ts_str[:10] if len(ts_str) > 9 else ''
+                                ts = log.get('timestamp')
+                                if not ts: continue
+                                
+                                # Requested Format: 2025 April 23
+                                # Note: Python's %B is locale-aware, using strftime
+                                date_val = ts.strftime("%Y %B %d")
+                                time_val = ts.strftime("%H:%M")
+                                
+                                # Format duration
+                                duration_val = log.get('duration')
+                                duration_str = None
+                                is_live = False
+                                
+                                # LIVE OVERRIDE: If person is currently in frame, show live timer
+                                if i == 0 and aadhar in self.intel_start_times:
+                                    duration_val = time.time() - self.intel_start_times[aadhar]
+                                    is_live = True
+
+                                if duration_val:
+                                    d_min = int(duration_val // 60)
+                                    d_sec = int(duration_val % 60)
+                                    duration_str = f"{d_min:02d}:{d_sec:02d}"
+                                    if is_live: duration_str += " LIVE"
                                 
                                 # Use simple names for cameras
                                 camera_id = log.get('client_id', 'Unknown Device')
@@ -557,11 +643,22 @@ class NiceDashboard:
                                             ui.label(text).classes('text-[12px] opacity-60 font-medium')
                                             ui.label(camera_name).classes('text-[13px] font-black text-white px-2 py-0.5 bg-white/5 rounded-sm')
                                         
-                                        with ui.row().classes('items-center gap-2 opacity-30 mt-0.5'):
-                                            ui.icon('calendar_today', size='10px')
-                                            ui.label(date_val).classes('text-[10px] font-mono')
-                                            if log.get('confidence'):
-                                                ui.label(f"· ID Conf: {log['confidence']*100:.0f}%").classes('text-[10px] font-mono')
+                                        with ui.column().classes('gap-1.5 mt-1'):
+                                            # Date Row
+                                            with ui.row().classes('items-center gap-1.5 opacity-30'):
+                                                ui.icon('calendar_today', size='12px')
+                                                ui.label(date_val).classes('text-[10px] uppercase tracking-wider font-bold')
+                                            
+                                            # Duration Row (Below Date)
+                                            if duration_str:
+                                                pulse_cls = 'animate-pulse' if is_live else ''
+                                                with ui.row().classes(f'items-center gap-1.5 bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20 w-fit {pulse_cls}'):
+                                                    ui.icon('timer', size='12px', color='primary')
+                                                    ui.label("STAY").classes('text-[8px] font-black text-primary opacity-60 uppercase tracking-widest')
+                                                    ui.label(duration_str).classes('text-[10px] font-mono font-bold text-primary')
+
+                                        if log.get('confidence'):
+                                            ui.label(f"· ID {log['confidence']*100:.0f}%").classes('text-[10px] font-mono opacity-20 ml-auto absolute bottom-4 right-4')
 
         dialog.open()
 
@@ -600,16 +697,32 @@ class NiceDashboard:
         client_id = data.get('client_id')
         detections = data.get('detections', [])
         
-        # 1. Update camera card overlay text
-        if client_id in self.camera_cards and detections:
-            names = [d.get('name', 'Unknown') for d in detections if d.get('name') != 'Unknown']
-            if names:
-                text = f"DET: {', '.join(names)}"
-                self.ui_queue.put(lambda c=self.camera_cards[client_id], t=text: c.update_metadata(t))
-        
-        # 2. Push each identified person to the LIVE INTELLIGENCE panel
+        # 1. Update identifying information & Persistence
         for det in detections:
-            if det and det.get('aadhar') and det.get('name', 'Unknown') != 'Unknown':
+            track_id = det.get('track_id')
+            aadhar = det.get('aadhar')
+            name = det.get('name', 'Unknown')
+            
+            # TRACK PERSISTENCE: If we identify someone, remember their track
+            if track_id is not None and aadhar and name != 'Unknown':
+                self.track_identities[(client_id, track_id)] = aadhar
+            
+            # If current frame is Unknown but we have a saved identity for this track
+            if track_id is not None and name == 'Unknown':
+                saved_aadhar = self.track_identities.get((client_id, track_id))
+                if saved_aadhar:
+                    # Update metadata so _update_intel keeps the card alive
+                    det['aadhar'] = saved_aadhar
+                    # We could also keep the name, but _update_intel 
+                    # mainly needs the aadhar to refresh the timer.
+            
+            # 2. Update camera card overlay text
+            if client_id in self.camera_cards and name != 'Unknown':
+                text = f"DET: {name}"
+                self.ui_queue.put(lambda c=self.camera_cards[client_id], t=text: c.update_metadata(t))
+
+            # 3. Push identified person to the LIVE INTELLIGENCE panel
+            if det.get('aadhar') and det.get('name', 'Unknown') != 'Unknown':
                 # Enrich with source camera
                 enriched = {**det, 'source': client_id}
                 self.ui_queue.put(lambda d=enriched: self._update_intel(d))

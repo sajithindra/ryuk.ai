@@ -121,13 +121,18 @@ class VideoProcessor(QThread):
                     for tid, track in list(self._tracker._tracks.items()):
                         if track.is_stale: continue
                         
-                        meta = track.pinned_identity if track.pinned_identity else track.id_cache
-                        name = meta.get("name", "Unknown") if meta else "Unknown"
+                        name, threat, meta = "Unknown", "Low", None
+                        if track.identity_id:
+                            meta = watchdog.get_metadata(track.identity_id)
+                            if meta:
+                                name = meta.get("name", "Unknown")
+                                threat = meta.get("threat_level", "Low")
+                                
                         display_name = f"[{tid}] {name}"
                         faces_to_draw.append({
                             "bbox": track.smoothed_bbox.astype(int),
                             "name": display_name,
-                            "threat": meta.get("threat_level", "Low") if meta else "Low",
+                            "threat": threat,
                             "embedding": track.avg_embedding
                         })
 
@@ -204,10 +209,9 @@ class VideoProcessor(QThread):
             # Potential slow DB/Network call
             name, threat, meta = self._recognise(track, track_id, context=context)
             
-            # PIN IDENTITY: If we found a valid person (with a name), lock it to this track
-            if meta and meta.get("name") and meta.get("name") != "Unknown":
-                track.pinned_identity = meta
-            track.id_cache = meta
+            # PIN IDENTITY: Only if we found a valid person (with a name), lock it to this track
+            if meta and meta.get("aadhar") and meta.get("aadhar") != "Unknown":
+                track.identity_id = meta["aadhar"]
 
             if meta and hasattr(raw_face, "pose"):
                 aadhar = meta.get("aadhar")
@@ -232,12 +236,12 @@ class VideoProcessor(QThread):
     def _recognise(self, track, track_id: int, context: dict | None = None) -> tuple[str, str, dict | None]:
         """Return (name, threat_level, meta). Uses FAISS directly."""
         # DETECT ONCE: If this track already has a verified identity, skip the search
-        if track.pinned_identity:
-            return track.pinned_identity.get("name", "Unknown"), \
-                   track.pinned_identity.get("threat_level", "Low"), \
-                   track.pinned_identity
+        if track.identity_id:
+            meta = watchdog.get_metadata(track.identity_id)
+            if meta:
+                return meta.get("name", "Unknown"), meta.get("threat_level", "Low"), meta
 
-        emb       = track.avg_embedding
+        emb = track.avg_embedding
  
         identity = watchdog.recognize_face(emb, threshold=FAISS_THRESHOLD, context=context)
         if identity:

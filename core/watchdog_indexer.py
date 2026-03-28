@@ -14,6 +14,7 @@ def rebuild_index_background():     return threading.Thread(target=_indexer.upda
 def enroll_face(*a, **kw):          _indexer.enroll_face(*a, **kw)
 def recognize_face(emb, threshold=FAISS_THRESHOLD, **kwargs):
     return _indexer.recognize_face(emb, threshold, **kwargs)
+def get_metadata(aadhar):           return _indexer.get_metadata(aadhar)
 def log_activity(aadhar, client_id): _indexer.log_activity(aadhar, client_id)
 def get_profile(aadhar):             return _indexer._profiles_col.find_one({"aadhar": aadhar})
 def get_all_profiles():             return _indexer.get_all_profiles()
@@ -24,6 +25,7 @@ def get_activity_report(aadhar, limit=50, days_ago=None):
 def augment_identity(aadhar, emb):  _indexer.augment_identity(aadhar, emb)
 def delete_camera(cid):             _indexer.delete_camera(cid)
 def register_camera_metadata(cid, locs, source=None): _indexer.register_camera_metadata(cid, locs, source)
+def finalize_activity_session(*a, **kw): _indexer.finalize_activity_session(*a, **kw)
 
 # Legacy aliases
 faiss_index   = property(lambda _: _indexer._faiss_index)

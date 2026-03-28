@@ -87,214 +87,136 @@ class Processor:
                 self.listeners.remove(listener)
 
     def _run(self):
-        last_frame_time = 0.0
+        """Main Processor Loop — Handles Frame Ingress and Result Rendering."""
+        last_frame_time = time.time()
+        last_inf_time = 0.0
         is_active = False
         
-        # Substream/Main Stream split logic
+        # GStreamer Engine (for RTSP)
+        gst = None
+        if self.source_url:
+            from core.gst_engine import GstEngine
+            # Initialize GStreamer Pipeline
+            gst = GstEngine(self.client_id, self.source_url)
+            gst.start()
+            self._ffmpeg_proc_ref = gst # For stop()
+        
+        # Legacy/Redis Logic Keys
         sub_key = f"stream:{self.client_id}:sub:frame"
-        main_key = f"stream:{self.client_id}:main:frame"
         legacy_key = f"stream:{self.client_id}:frame"
         
-        # Pull model (RTSP) vs Push model (Redis)
-        cap = None
-        grabber_thread = None
-        hw_decoder = None
-        cap = None
-        latest_frame_data = {"frame": None, "lock": threading.Lock(), "running": True}
-        ffmpeg_proc = None # Critical fix for cleanup NameError
-
-        if self.source_url:
-            if USE_FFMPEG_CUDA:
-                # 1. Dynamic Resolution Discovery via ffprobe
-                try:
-                    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 {shlex.quote(self.source_url)}"
-                    res_raw = subprocess.check_output(shlex.split(probe_cmd), timeout=5).decode().strip()
-                    native_w, native_h = map(int, res_raw.split('x'))
-                    print(f"DEBUG: Processor ({self.client_id}) — Auto-detected Stream Resolution: {native_w}x{native_h}")
-                except Exception as e:
-                    print(f"DEBUG: Processor ({self.client_id}) — Resolution discovery failed: {e}. Falling back to 1080p.")
-                    native_w, native_h = 1920, 1080
-
-                print(f"DEBUG: Processor ({self.client_id}) — Launching HwDecoder for RTSP: {self.source_url}")
-                from core.hw_decoder import HwDecoder
-                hw_decoder = HwDecoder(native_w, native_h, codec="h264_cuvid")
-                hw_decoder.start(source=self.source_url)
-                self._ffmpeg_proc_ref = hw_decoder # Save for stop()
-                w, h = native_w, native_h
-                
-            else:
-                print(f"DEBUG: Processor ({self.client_id}) - Opening RTSP stream (OpenCV Backend): {self.source_url}")
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|strict;experimental"
-                cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
-                if not cap.isOpened():
-                    print(f"DEBUG: Processor ({self.client_id}) - FAILED TO OPEN RTSP STREAM: {self.source_url}")
-                    return
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-            def grabber():
-                if hw_decoder:
-                    while self.running and latest_frame_data["running"]:
-                        frame = hw_decoder.read_frame()
-                        if frame is None:
-                            print(f"DEBUG: Processor ({self.client_id}) - HwDecoder Read Break. Retrying...")
-                            hw_decoder.restart(source=self.source_url)
-                            time.sleep(1.0)
-                            continue
-                        
-                        with latest_frame_data["lock"]:
-                            latest_frame_data["frame"] = frame.copy()
-                else:
-                    while self.running and latest_frame_data["running"]:
-                        if not cap.grab():
-                            time.sleep(1.0)
-                            cap.open(self.source_url, cv2.CAP_FFMPEG)
-                            continue
-                        
-                        with latest_frame_data["lock"]:
-                            needs_new_frame = latest_frame_data["frame"] is None
-                        
-                        if needs_new_frame:
-                            ret, frame = cap.retrieve()
-                            if ret:
-                                with latest_frame_data["lock"]:
-                                    latest_frame_data["frame"] = frame
-                        else:
-                            time.sleep(0.001)
-            
-            grabber_thread = threading.Thread(target=grabber, daemon=True)
-            grabber_thread.start()
-
-        # Redis-based JPEG Decoder (NVDEC)
-        jpeg_hw_decoder = None
-
         while self.running:
             frame = None
             
-            if self.source_url:
-                with latest_frame_data["lock"]:
-                    frame = latest_frame_data["frame"]
-                    latest_frame_data["frame"] = None # Consume
-                
-                if frame is None:
-                    time.sleep(0.001)
-                    continue
+            # 1. PULL FRAME
+            if gst:
+                # GStreamer Case (RTSP)
+                frame = gst.latest_ai_frame
             else:
-                # Optimized Redis Pull with Substream/Main split
-                # Processor (this class) is primarily for UI display, so it pulls SUBSTREAM
+                # Redis Case (Push-based)
                 raw_sub = cache.get(sub_key) or cache.get(legacy_key)
                 if raw_sub:
-                    if USE_FFMPEG_CUDA:
-                        if jpeg_hw_decoder is None:
-                            # Auto-detect resolution from first frame (CPU decode once)
-                            temp_frame = self._decode_frame(raw_sub)
-                            if temp_frame is not None:
-                                h_sub, w_sub = temp_frame.shape[:2]
-                                from core.hw_decoder import JpegBatchDecoder
-                                jpeg_hw_decoder = JpegBatchDecoder(w_sub, h_sub)
-                                frame = temp_frame
-                        else:
-                            frame = jpeg_hw_decoder.decode(raw_sub)
-                    else:
-                        frame = self._decode_frame(raw_sub)
-                
-                if frame is None:
-                    if self._frame_count % 100 == 0:
-                        print(f"DEBUG: Processor ({self.client_id}) - Waiting for Redis frame: {sub_key}")
+                    frame = self._decode_frame(raw_sub)
             
-            if frame is not None:
-                if not is_active:
-                    is_active = True
-                    with self._inf_lock:
-                        for l in list(self.listeners):
-                            if hasattr(l, 'on_stream_start'):
-                                print(f"DEBUG: Processor ({self.client_id}) — Notifying listener on_stream_start")
-                                l.on_stream_start(self.client_id)
-
-                self._frame_count = (self._frame_count + 1) % 10_000
-                
-                # Push to Micro-Pipeline (Non-blocking)
-                # Optimization: Only push to ingestion if we are the primary source (RTSP).
-                # WebSocket streams are already pushed by StreamingServer (core/server.py).
-                if self.source_url and self._frame_count % INFERENCE_THROTTLE == 0:
-                    try:
-                        packet = {
-                            "client_id": self.client_id,
-                            "frame_count": self._frame_count,
-                            "timestamp": time.time(),
-                            "frame": frame.copy()
-                        }
-                        # We use rpush for the ingestion queue
-                        cache.rpush("ryuk:ingest", serde.pack(packet))
-                        # Limit queue size to prevent blowup if services are down
-                        if cache.llen("ryuk:ingest") > 100:
-                            cache.lpop("ryuk:ingest")
-                    except Exception as e:
-                        print(f"DEBUG: Processor ({self.client_id}) — Failed to push to pipeline: {e}")
-                
-                with self._inf_lock:
-                    self._tracker.predict()
-
-                # Get latest track states for drawing (Skip stale ones for real-time responsiveness)
-                faces_to_draw = []
-                detections_to_sync = []
-                now = time.time()
-                should_sync_ui = (now - self._last_ui_update > 1.0)
-                
-                with self._inf_lock:
-                    for tid, track in list(self._tracker._tracks.items()):
-                        # Skip if stale even if not yet pruned by background thread
-                        if track.is_stale:
-                            continue
-                            
-                        # Prioritize pinned_identity for life-of-track stability
-                        meta = track.pinned_identity if track.pinned_identity else track.id_cache
-                        
-                        if not meta:
-                             _, _, meta = self._get_cached_identity(track)
-                        
-                        # Sync identified tracks to UI listeners to keep cards alive
-                        if should_sync_ui and meta and "aadhar" in meta:
-                            detections_to_sync.append(meta)
-                        
-                        faces_to_draw.append({
-                            "bbox": track.smoothed_bbox.astype(int),
-                            "name": meta.get("name", "Unknown") if meta else "Unknown",
-                            "threat": meta.get("threat_level", "Low") if meta else "Low"
-                        })
-
-                if should_sync_ui:
-                    self._last_ui_update = now
-                    if detections_to_sync:
-                        for l in list(self.listeners):
-                            if hasattr(l, 'on_detection'):
-                                l.on_detection({'client_id': self.client_id, 'detections': detections_to_sync})
-
-                self._draw_frame(frame, faces_to_draw)
-                encoded = self._encode_frame(frame)
-                if encoded:
-                    self.latest_processed_frame = encoded
-                
-                last_frame_time = time.time()
-            else:
-                # Inactivity logic: Works for both Redis and RTSP
-                if is_active and (time.time() - last_frame_time > 5.0):
+            if frame is None:
+                time.sleep(0.001) # Idle CPU saver
+                # Inactivity Check
+                if is_active and (time.time() - last_frame_time > 10.0):
                     is_active = False
                     with self._inf_lock:
                         self._tracker.clear()
                         for l in list(self.listeners):
                             if hasattr(l, 'on_inactive'):
-                                print(f"DEBUG: Processor ({self.client_id}) timed out after 5s of no frames.")
                                 l.on_inactive(self.client_id)
-                time.sleep(0.01) # Small sleep only when IDLE
-        
-        latest_frame_data["running"] = False
-        if grabber_thread:
-            grabber_thread.join(timeout=1.0)
-        if cap:
-            cap.release()
-        if 'ffmpeg_proc' in locals() and ffmpeg_proc:
-            ffmpeg_proc.terminate()
-            ffmpeg_proc.wait(timeout=1.0)
+                continue
+
+            # 2. MANAGE STATE
+            if not is_active:
+                is_active = True
+                with self._inf_lock:
+                    for l in list(self.listeners):
+                        if hasattr(l, 'on_stream_start'):
+                            l.on_stream_start(self.client_id)
+            
+            self._frame_count = (self._frame_count + 1) % 10_000
+            last_frame_time = time.time()
+
+            # 3. PUSH TO INFERENCE (Throttled)
+            if self._frame_count % INFERENCE_THROTTLE == 0:
+                self._push_to_redis(frame)
+
+            # 4. TRACKING & METADATA
+            with self._inf_lock:
+                self._tracker.predict()
+                
+            faces_to_draw = []
+            detections_to_sync = []
+            now = time.time()
+            # UI Refresh rate
+            should_sync_ui = (now - self._last_ui_update > 0.5)
+            
+            with self._inf_lock:
+                for tid, track in list(self._tracker._tracks.items()):
+                    if track.is_stale: continue
+                    
+                    # Identity Lookup
+                    name, threat, meta = "Unknown", "Low", None
+                    if track.identity_id:
+                        meta = watchdog.get_metadata(track.identity_id)
+                        if meta:
+                            name = meta.get("name", "Unknown")
+                            threat = meta.get("threat_level", "Low")
+                    
+                    # Sync to UI Sidebar
+                    if should_sync_ui and meta and "aadhar" in meta:
+                        detections_to_sync.append(meta)
+                    
+                    # Filter Visual Bounding Box (Ghost Mitigation)
+                    if track.time_since_update <= 10: # ~1s visibility
+                        faces_to_draw.append({
+                            "track_id": tid,
+                            "bbox": track.smoothed_bbox.astype(int),
+                            "name": name,
+                            "threat": threat
+                        })
+
+            if should_sync_ui:
+                self._last_ui_update = now
+                if detections_to_sync:
+                    for l in list(self.listeners):
+                        if hasattr(l, 'on_detection'):
+                            l.on_detection({'client_id': self.client_id, 'detections': detections_to_sync})
+
+            # 5. RENDER OVERLAYS
+            if gst:
+                # OFF-LOAD TO PIPELINE (Zero-copy Cairo)
+                gst.update_faces(faces_to_draw)
+                self.latest_processed_frame = gst.latest_ui_frame
+            else:
+                # Fallback to OpenCV drawing for Redis/Web sources
+                self._draw_frame(frame, faces_to_draw)
+                self.latest_processed_frame = self._encode_frame(frame)
+
+        # 6. CLEANUP
+        if gst:
+            gst.stop()
+
+    def _push_to_redis(self, frame: np.ndarray):
+        """Encapsulated Redis Ingestion Logic."""
+        try:
+            packet = {
+                "client_id": self.client_id,
+                "frame_count": self._frame_count,
+                "timestamp": time.time(),
+                "frame": frame.copy()
+            }
+            # We use rpush for the ingestion queue
+            cache.rpush("ryuk:ingest", serde.pack(packet))
+            # Limit queue size to prevent blowup if services are down
+            if cache.llen("ryuk:ingest") > 100:
+                cache.lpop("ryuk:ingest")
+        except Exception as e:
+            print(f"DEBUG: Processor ({self.client_id}) — Failed to push to pipeline: {e}")
 
     def _pipeline_result_worker(self):
         """Polls Redis for latest pipeline results and updates tracker."""
@@ -349,10 +271,9 @@ class Processor:
                             else:
                                 meta = getattr(raw_face, "ident_meta", None)
                                 
-                            # PIN IDENTITY: Only if we found a valid person (with a name)
-                            if meta and meta.get("name") and meta.get("name") != "Unknown":
-                                track.pinned_identity = meta
-                            track.id_cache = meta
+                            # PIN IDENTITY: Store the unique identifier (Aadhar)
+                            if meta and meta.get("aadhar") and meta.get("aadhar") != "Unknown":
+                                track.identity_id = meta["aadhar"]
 
                             # Signal UI listeners
                             if meta and "aadhar" in meta:
@@ -367,19 +288,6 @@ class Processor:
                 print(f"DEBUG: Processor ({self.client_id}) — Result Worker Error: {e}")
                 time.sleep(1)
 
-    def _get_cached_identity(self, track) -> tuple[str, str, dict | None]:
-        """Helper to get name/threat from track cache or last AI results."""
-        if track.pinned_identity:
-            return track.pinned_identity.get("name", "Unknown"), \
-                   track.pinned_identity.get("threat_level", "Low"), \
-                   track.pinned_identity
-
-        if track.id_cache:
-            return track.id_cache.get("name", "Unknown"), \
-                   track.id_cache.get("threat_level", "Low"), \
-                   track.id_cache
-
-        return "Unknown", "Low", None
 
     def _draw_frame(self, frame: np.ndarray, faces: List[Dict]):
         from config import VIDEO_DRAW_THICKNESS_SCALE, VIDEO_FONT_SCALE_BASE
