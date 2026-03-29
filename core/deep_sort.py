@@ -57,9 +57,10 @@ class KalmanFilter:
         self.P = (np.eye(8) - K @ self.H) @ self.P
 
 class DeepSortTrack:
-    def __init__(self, track_id, bbox, face_embedding=None, raw_face=None, label='face'):
+    def __init__(self, track_id, bbox, face_embedding=None, raw_face=None, label='face', action='Unknown'):
         self.track_id = track_id
         self.label = label
+        self.action = action
         self.kf = KalmanFilter(bbox)
         self.face_embedding = face_embedding
         self.raw_face = raw_face
@@ -100,10 +101,11 @@ class DeepSortTrack:
         self.smoothed_bbox = alpha * predicted + (1.0 - alpha) * self.smoothed_bbox
         return predicted
 
-    def update(self, bbox, face_embedding=None, raw_face=None, label=None):
+    def update(self, bbox, face_embedding=None, raw_face=None, label=None, action=None):
         self.kf.update(bbox)
         self.raw_face = raw_face
         if label: self.label = label
+        if action and action != "Unknown": self.action = action
         
         # Exponential moving average for embeddings (Only for faces or if person provides face chip)
         alpha = 0.9
@@ -174,11 +176,13 @@ class DeepSortTracker:
         face_embs = []
         raw_faces_list = []
         labels = []
+        actions = []
         
         for f in faces:
             bbox = None
             emb = None
             label = 'face'
+            action = 'Unknown'
             
             if hasattr(f, 'bbox'): 
                 bbox = f.bbox
@@ -187,12 +191,14 @@ class DeepSortTracker:
                 bbox = f.get('bbox')
                 emb = f.get('embedding')
                 label = f.get('label', 'face')
+                action = f.get('action', 'Unknown')
             
             if bbox is not None:
                 detections.append(bbox)
                 face_embs.append(emb)
                 raw_faces_list.append(f)
                 labels.append(label)
+                actions.append(action)
 
         if not detections:
             # Just age existing tracks
@@ -293,17 +299,18 @@ class DeepSortTracker:
                 detections[det_idx], 
                 face_embedding=face_embs[det_idx], 
                 raw_face=raw_faces_list[det_idx],
-                label=labels[det_idx]
+                label=labels[det_idx],
+                action=actions[det_idx]
             )
 
-        # 3. Handle Unmatched Detections (New Tracks)
         for det_idx in unmatched_detections:
             self.tracks[self._next_id] = DeepSortTrack(
                 self._next_id, 
                 detections[det_idx], 
                 face_embedding=face_embs[det_idx], 
                 raw_face=raw_faces_list[det_idx],
-                label=labels[det_idx]
+                label=labels[det_idx],
+                action=actions[det_idx]
             )
             self._next_id += 1
 

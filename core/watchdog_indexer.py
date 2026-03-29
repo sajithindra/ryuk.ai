@@ -14,7 +14,7 @@ def rebuild_index_background():     return threading.Thread(target=_indexer.upda
 def enroll_face(*a, **kw):          _indexer.enroll_face(*a, **kw)
 def recognize_face(emb, threshold=FAISS_THRESHOLD, **kwargs):
     return _indexer.recognize_face(emb, threshold, **kwargs)
-def log_activity(aadhar, client_id): _indexer.log_activity(aadhar, client_id)
+def log_activity(aadhar, client_id, action="Unknown"): _indexer.log_activity(aadhar, client_id, action)
 def get_profile(aadhar):             return _indexer._profiles_col.find_one({"aadhar": aadhar})
 def get_all_profiles():             return _indexer.get_all_profiles()
 def delete_profile(aadhar):         _indexer.delete_profile(aadhar)

@@ -200,13 +200,14 @@ class UnifiedInferenceEngine:
                     "label": track.label,
                     "name": name,
                     "threat_level": threat,
-                    "is_identified": track.is_identified
+                    "is_identified": track.is_identified,
+                    "action": getattr(track, 'action', 'Unknown')
                 }
                 output_objects.append(obj_dict)
                 
                 if track.label == 'person':
                     # Also append to search_results for legacy compatibility if needed
-                    search_results.append({"name": name, "threat_level": threat, "track_id": tid})
+                    search_results.append({"name": name, "threat_level": threat, "track_id": tid, "action": getattr(track, 'action', 'Unknown')})
                 
                 elif track.label == 'face':
                     # If we are tracking legacy faces, add them too (optional)

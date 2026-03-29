@@ -64,7 +64,7 @@ def run_sink_service():
                     # 1. Activity Logging (with cooldown)
                     lock_key = f"log_lock:{aadhar}:{client_id}"
                     if not cache_str.get(lock_key):
-                        watchdog.log_activity(aadhar, client_id)
+                        watchdog.log_activity(aadhar, client_id, res.get('action', 'Unknown'))
                         cache_str.set(lock_key, "1", ex=int(LOG_COOLDOWN_S))
                         
                     # 2. Auto-Augmentation (Frontal face update)
@@ -76,8 +76,10 @@ def run_sink_service():
                         if all(abs(angle) < 15 for angle in pose):
                             aug_lock = f"aug_lock:{aadhar}"
                             if not cache_str.get(aug_lock):
-                                watchdog.augment_identity(aadhar, face_obj.get('embedding'))
-                                cache_str.set(aug_lock, "1", ex=3600)
+                                emb = face_obj.get('embedding')
+                                if emb is not None:
+                                    watchdog.augment_identity(aadhar, emb)
+                                    cache_str.set(aug_lock, "1", ex=3600)
                 
                 # 3. Intelligence & Security Alerts
                 if aadhar:

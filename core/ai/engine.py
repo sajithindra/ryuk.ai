@@ -52,6 +52,16 @@ class GlobalAIProcessor:
         except Exception as e:
             logger.error(f"[YOLO] Initialization failed: {e}")
             self.yolo = None
+            
+        # Load YOLO Pose for Activity Recognition
+        try:
+            self.yolo_pose = YOLO('yolo11n-pose.pt')
+            if torch.cuda.is_available():
+                self.yolo_pose.to('cuda')
+            logger.info("[YOLO-Pose] Enabled for Activity Detection (yolo11n-pose)")
+        except Exception as e:
+            logger.error(f"[YOLO-Pose] Initialization failed: {e}")
+            self.yolo_pose = None
         
         if use_worker:
             # Multi-threaded batch workers for higher throughput
@@ -178,7 +188,8 @@ class GlobalAIProcessor:
                 
                 if yolo_frames:
                     # logger.debug(f"[YOLO] Processing batch of {len(yolo_frames)} frames")
-                    yolo_results = self.yolo(yolo_frames, stream=True, verbose=False, conf=0.15, iou=0.5)
+                    # Optimized: 0.45 threshold eliminates majority of false positives
+                    yolo_results = self.yolo(yolo_frames, stream=True, verbose=False, conf=0.45, iou=0.5)
                     for i, r in enumerate(yolo_results):
                         orig_idx = yolo_indices[i] 
                         frame_objs = []
@@ -190,6 +201,17 @@ class GlobalAIProcessor:
                         for box in boxes:
                             det_id = str(uuid.uuid4())[:8]
                             label = self.yolo.names[int(box.cls[0])]
+                            conf_val = float(box.conf[0])
+                            
+                            # HIGH-INTEREST ONLY (Filter out static objects like chairs, plants)
+                            high_interest = ["person", "car", "motorcycle", "bicycle", "bus", "truck", "dog", "cat", "handgun"]
+                            if label.lower() not in high_interest:
+                                continue
+                                
+                            # Class-specific confidence filtering (combat "ghost" person detections)
+                            if label.lower() == "person" and conf_val < 0.60:
+                                continue
+                                
                             bbox = box.xyxy[0].tolist()
                             
                             # Cache for reinforcement training
@@ -197,13 +219,84 @@ class GlobalAIProcessor:
                                 self.training_cache.pop(next(iter(self.training_cache)))
                             self.training_cache[det_id] = (valid_frames[orig_idx].copy(), label, bbox)
 
+                            # Check keypoints if pose model is active
+                            action = "Unknown"
+                            
                             frame_objs.append({
                                 "det_id": det_id,
                                 "bbox": bbox,
                                 "label": label,
-                                "confidence": float(box.conf[0])
+                                "confidence": conf_val,
+                                "action": action
                             })
                         all_objects[orig_idx] = frame_objs
+                
+                # Run YOLO Pose only on frames that had a person detected
+                if self.yolo_pose and yolo_frames:
+                    # Collect frames where at least one person was found
+                    pose_indices = []
+                    pose_frames = []
+                    for i, orig_idx in enumerate(yolo_indices):
+                        has_person = any(obj['label'] == 'person' for obj in all_objects[orig_idx])
+                        if has_person:
+                            pose_indices.append(orig_idx)
+                            pose_frames.append(yolo_frames[i])
+                    
+                    if pose_frames:
+                        pose_results = self.yolo_pose(pose_frames, stream=True, verbose=False, conf=0.45)
+                        for i, p_r in enumerate(pose_results):
+                            orig_idx = pose_indices[i]
+                            if not p_r.keypoints or p_r.keypoints.data.shape[1] == 0:
+                                continue
+                            
+                            # Match pose bounding boxes with person bounding boxes
+                            for p_idx, p_box in enumerate(p_r.boxes.xyxy):
+                                p_bbox = p_box.tolist()
+                                p_kpts = p_r.keypoints.data[p_idx] # shape (17, 3)
+                                
+                                # Find best matching person box in all_objects[orig_idx]
+                                best_iou = 0
+                                best_obj = None
+                                
+                                for obj in all_objects[orig_idx]:
+                                    if obj['label'] != 'person': continue
+                                    o_bbox = obj['bbox']
+                                    # Calculate IoU
+                                    xA = max(p_bbox[0], o_bbox[0])
+                                    yA = max(p_bbox[1], o_bbox[1])
+                                    xB = min(p_bbox[2], o_bbox[2])
+                                    yB = min(p_bbox[3], o_bbox[3])
+                                    interArea = max(0, xB - xA) * max(0, yB - yA)
+                                    boxAArea = (p_bbox[2] - p_bbox[0]) * (p_bbox[3] - p_bbox[1])
+                                    boxBArea = (o_bbox[2] - o_bbox[0]) * (o_bbox[3] - o_bbox[1])
+                                    iou = interArea / float(boxAArea + boxBArea - interArea)
+                                    
+                                    if iou > best_iou:
+                                        best_iou = iou
+                                        best_obj = obj
+                                        
+                                if best_iou > 0.5 and best_obj is not None:
+                                    # Classify pose
+                                    # Keypoints: 11, 12 = hips | 13, 14 = knees | 15, 16 = ankles
+                                    # Simple heuristic for Sitting vs Standing
+                                    # If the hips are placed vertically close to the knees, they're sitting.
+                                    try:
+                                        hip_y = (p_kpts[11][1] + p_kpts[12][1]) / 2.0
+                                        knee_y = (p_kpts[13][1] + p_kpts[14][1]) / 2.0
+                                        ankle_y = (p_kpts[15][1] + p_kpts[16][1]) / 2.0
+                                        
+                                        hip_to_knee = knee_y - hip_y
+                                        knee_to_ankle = ankle_y - knee_y
+                                        
+                                        # Hips confidence > 0.5 and Knees confidence > 0.5
+                                        if min(p_kpts[11][2], p_kpts[12][2], p_kpts[13][2], p_kpts[14][2]) > 0.4:
+                                            # If hip-to-knee vertical distance is very small compared to knee-to-ankle, likely sitting
+                                            if hip_to_knee < knee_to_ankle * 0.5:
+                                                best_obj['action'] = "Sitting"
+                                            else:
+                                                best_obj['action'] = "Standing"
+                                    except Exception:
+                                        pass
             else:
                 all_objects = [[] for _ in valid_frames]
 

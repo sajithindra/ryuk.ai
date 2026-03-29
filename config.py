@@ -40,10 +40,12 @@ ADAPTIVE_MIN_THRESHOLD = 0.35  # Never go below this (too sensitive)
 ADAPTIVE_MAX_THRESHOLD = 0.60  # Never go above this (too conservative)
 SCORE_HISTORY_SIZE     = 100   # Sliding window for distribution tracking
 
+# PERSISTENCE TUNING
 MAX_POSES_PER_ID      = 10     # Max reference embeddings per person
 AUTO_AUGMENT_MIN_SIM  = 0.35   # Similarity > this + tilt = auto-add to profile
 AUTO_AUGMENT_TILT_DEG = 15     # Yaw/Pitch/Roll > this = "tilted"
-FACE_MAX_INACTIVE_S   = 3.0    # Remove unidentified face box after 3s without detection
+
+FACE_MAX_INACTIVE_S   = 2.0    # Reduced from 5.0 to 2.0 to kill ghost tracks faster
 FACE_PINNED_MAX_INACTIVE_S = 30.0 # Keep identified person track for 30s
 FACE_TRACK_MAX_DIST   = 400    # Increased for fast movement and head twists
 FACE_TRACK_HISTORY    = 5      # Max embedding history per tracked face
@@ -66,10 +68,10 @@ ENABLE_TENSORRT = True       # Set to True only if libnvinfer.so.10 is installed
 ENABLE_CUDA     = True       # Highly recommended for GPU acceleration
 
 # DeepSORT Tracking
-TRACKER_MAX_AGE = 300         # Sustained for 10s at 30fps
-TRACKER_N_INIT  = 1          # Show face boxes immediately (1 frame to confirm)
+TRACKER_MAX_AGE = 60         # Sustained for 2s at 30fps
+TRACKER_N_INIT  = 3          # Require 3 consecutive hits before showing a track (filters out noise)
 TRACKER_MATCH_THRESHOLD = 0.7 # Cosine distance threshold for appearance matching
-TRACKER_IOU_THRESHOLD   = 0.2 # Lowered 0.3 -> 0.2 for better stability between detection skips
+TRACKER_IOU_THRESHOLD   = 0.4 # Increased 0.2 -> 0.4 for higher precision matching
 
 
 
@@ -103,7 +105,7 @@ RTSP_LOW_LATENCY_FLAGS = [
 VIDEO_JPEG_QUALITY = 85
 VIDEO_DRAW_THICKNESS_SCALE = 400
 VIDEO_FONT_SCALE_BASE = 1600.0
-RTSP_URL_TEMPLATE = os.getenv("RTSP_URL_TEMPLATE", "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel=1&subtype=1")
+RTSP_URL_TEMPLATE = os.getenv("RTSP_URL_TEMPLATE", "rtsp://{username}:{password}@{ip}:{port}/cam/realmonitor?channel=1&subtype=0")
 
 # ---------------------------------------------------------------------------
 # UI

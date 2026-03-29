@@ -130,13 +130,25 @@ class ActivityReportDialog(QMainWindow):
             row.setFixedHeight(20)
             rl = QHBoxLayout(row)
             rl.setContentsMargins(8, 0, 8, 0); rl.setSpacing(10)
-            locs = log.get("locations", ["Unknown", "Unknown"])
+            locs = log.get("location") or ["Unknown", "Unknown"] # Fallback if location is None
             
-            l1 = QLabel(log.get("date_str", "?"))
+            ts = log.get("timestamp")
+            if ts:
+                date_str = ts.strftime("%Y %b %d %H:%M").lower() # e.g. 2025 jan 23 14:30
+            else:
+                date_str = log.get("date_str", "?")
+                
+            l1 = QLabel(date_str)
             l1.setObjectName("LogTime")
-            l1.setFixedWidth(60)
+            l1.setFixedWidth(140)
             
-            l2 = QLabel(f"📍 {locs[0]} ➔ {locs[1]}")
+            action = log.get("action", "Unknown")
+            if action != "Unknown":
+                activity_text = f"📍 {locs[0]} ➔ {locs[1]} | 🤸 {action}"
+            else:
+                activity_text = f"📍 {locs[0]} ➔ {locs[1]}"
+                
+            l2 = QLabel(activity_text)
             l2.setObjectName("LogAction")
             
             l3 = QLabel(f"[{log.get('client_id','?')}]")

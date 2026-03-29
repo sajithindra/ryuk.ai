@@ -249,7 +249,7 @@ class WatchdogIndexer:
         
         return float(np.clip(base_threshold + lighting_penalty + quality_penalty + pose_penalty, ADAPTIVE_MIN_THRESHOLD, ADAPTIVE_MAX_THRESHOLD))
 
-    def log_activity(self, aadhar: str, client_id: str):
+    def log_activity(self, aadhar: str, client_id: str, action: str = "Unknown"):
         if self._activity_col is None: return
         cooldown_key = f"cooldown:log:{aadhar}:{client_id}"
         if cache_str.exists(cooldown_key): return
@@ -271,7 +271,7 @@ class WatchdogIndexer:
             pipe.execute()
 
         try:
-            self._activity_col.insert_one({"aadhar": aadhar, "client_id": client_id, "location": location, "device_info": device_info, "timestamp": datetime.now(), "date_str": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            self._activity_col.insert_one({"aadhar": aadhar, "client_id": client_id, "location": location, "device_info": device_info, "action": action, "timestamp": datetime.now(), "date_str": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             cache_str.setex(cooldown_key, int(LOG_COOLDOWN_S), "1")
             logger.info(f"Watchdog: Logged {aadhar} @ {location}")
         except Exception as e: logger.error(f"Watchdog: Log failed — {e}")
@@ -315,7 +315,7 @@ class WatchdogIndexer:
         self._profiles_col.update_one({"aadhar": aadhar}, {"$set": data}); self.update_index()
 
     def augment_identity(self, aadhar: str, embedding: np.ndarray):
-        if self._profiles_col is None or not aadhar: return
+        if self._profiles_col is None or not aadhar or embedding is None: return
         self._profiles_col.update_one({"aadhar": aadhar}, {"$push": {"embeddings": {"$each": [embedding.astype(np.float32).tobytes()], "$slice": -MAX_POSES_PER_ID}}})
         norm_emb = np.ascontiguousarray(embedding.astype(np.float32))
         with self._lock:

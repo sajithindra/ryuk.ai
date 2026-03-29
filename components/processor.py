@@ -40,6 +40,7 @@ class Processor:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.target_size = (640, 480)
+        self.performance_mode = False # Default to Bandwidth Saver
         
         self._frame_count = 0
         self._last_faces: List[Dict] = []
@@ -60,6 +61,7 @@ class Processor:
         self._result_worker_thread.start()
         
         self._last_ui_update = 0.0
+        self.frame_ready = threading.Condition()
 
     def start(self):
         self.running = True
@@ -282,6 +284,8 @@ class Processor:
                 encoded = self._encode_frame(frame)
                 if encoded:
                     self.latest_processed_frame = encoded
+                    with self.frame_ready:
+                        self.frame_ready.notify_all()
                 
                 last_frame_time = time.time()
             else:
@@ -378,8 +382,8 @@ class Processor:
                                     if hasattr(l, 'on_detection'):
                                         l.on_detection({'client_id': self.client_id, 'detections': [meta]})
                 
-                # Sleep to prevent tight loop
-                time.sleep(0.05)
+                # Minimal sleep to prevent tight loop if blpop didn't wait
+                time.sleep(0.001)
                 
             except Exception as e:
                 print(f"DEBUG: Processor ({self.client_id}) — Result Worker Error: {e}")
@@ -400,55 +404,64 @@ class Processor:
         return "Unknown", "Low", None
 
     def _draw_frame(self, frame: np.ndarray, faces: List[Dict], objects: List[Dict] = None):
-        from config import VIDEO_DRAW_THICKNESS_SCALE, VIDEO_FONT_SCALE_BASE
         h, w = frame.shape[:2]
-        # Responsive thickness: on 4k (3840w), thinner than 2 would be invisible.
-        base_thickness = max(1, int(w / VIDEO_DRAW_THICKNESS_SCALE))
-        
-        # Responsive font scaling: at 1600px width, font_scale is ~1.0
-        font_scale = h / 640.0 # Standardize scale to reference height
+        base_thickness = max(1, int(w / 1200))
+        font_scale = h / 1000.0 
         font_scale = max(0.4, font_scale) 
-        text_thickness = max(1, int(base_thickness / 2))
+        text_thickness = max(1, int(base_thickness))
 
-        # Color palette
+        # Premium Color Palette (BGR)
         COLORS = {
-            "High": (83, 83, 255),    # Terracotta/Red
-            "Medium": (0, 140, 255),  # Tactical Orange
-            "Low": (83, 222, 83),     # Safe Green
-            "Object": (255, 120, 0),  # Vivid Cyber Blue (BGR)
-            "Text": (255, 255, 255),
-            "BG": (10, 8, 5)
+            "Threat_High": (83, 83, 255),    # Red
+            "Threat_Med": (0, 140, 255),     # Orange
+            "Threat_Low": (83, 222, 83),     # Green
+            "Vehicle": (255, 190, 80),       # Cyan/Blue
+            "Object": (200, 200, 200),       # Silver/Grey
+            "Identity": (255, 255, 255),     # White
+            "Overlay_BG": (15, 12, 10)       # Deep Obsidian
         }
 
-        # 1. Draw General Objects
+        def draw_corners(img, bbox, color, thickness=1, length=15):
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            # Top Left
+            cv2.line(img, (x1, y1), (x1 + length, y1), color, thickness)
+            cv2.line(img, (x1, y1), (x1, y1 + length), color, thickness)
+            # Top Right
+            cv2.line(img, (x2, y1), (x2 - length, y1), color, thickness)
+            cv2.line(img, (x2, y1), (x2, y1 + length), color, thickness)
+            # Bottom Left
+            cv2.line(img, (x1, y2), (x1 + length, y2), color, thickness)
+            cv2.line(img, (x1, y2), (x1, y2 - length), color, thickness)
+            # Bottom Right
+            cv2.line(img, (x2, y2), (x2 - length, y2), color, thickness)
+            cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness)
+
+        # 1. Draw Standalone Objects (Vehicles, bags, etc.)
         if objects:
             for obj in objects:
                 label = obj["label"].lower()
-                
-                # Skip drawing 'person' as a generic object since it's handled in the specialized section below
-                if label == "person":
-                    continue
+                if label == "person": continue # Handled by specialized person drawer
 
-                bbox = [int(v) for v in obj["bbox"]]
+                bbox = obj["bbox"]
+                color = COLORS["Vehicle"] if label in ["car", "truck", "bus", "motorcycle"] else COLORS["Object"]
+                
+                # Cornered boxes for lower visual clutter
+                draw_corners(frame, bbox, color, base_thickness, length=12)
+                
+                # Discrete Label
                 conf = obj.get("confidence", 0.0)
+                txt = f"{label.upper()} {int(conf*100)}%" if conf > 0.4 else label.upper()
+                font = cv2.FONT_HERSHEY_DUPLEX
+                (tw, th), bl = cv2.getTextSize(txt, font, font_scale * 0.7, text_thickness)
                 
-                # Draw box with responsive thickness
-                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), COLORS["Object"], base_thickness, cv2.LINE_4)
+                lx, ly = int(bbox[0]), int(bbox[1]) - 5
+                if ly < th: ly = int(bbox[1]) + th + 10
                 
-                # Small label
-                txt = f"{obj['label'].upper()} {int(conf*100)}%" if conf > 0 else obj['label'].upper()
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                (tw, th), bl = cv2.getTextSize(txt, font, font_scale * 0.6, text_thickness)
-                
-                lx, ly = bbox[0], bbox[1] - 5
-                if ly < th: ly = bbox[1] + th + 5
-                
-                # Background rect for readability
-                cv2.rectangle(frame, (lx, ly - th - 2), (lx + tw, ly + 2), COLORS["BG"], -1)
-                cv2.putText(frame, txt, (lx, ly), font, font_scale * 0.6, COLORS["Object"], text_thickness, cv2.LINE_4)
+                # Thin background line for label
+                cv2.rectangle(frame, (lx, ly - th - 4), (lx + tw + 4, ly + 4), COLORS["Overlay_BG"], -1)
+                cv2.putText(frame, txt, (lx + 2, ly), font, font_scale * 0.7, color, text_thickness, cv2.LINE_AA)
 
-        # 2. Draw Faces (Higher Priority)
-        # 2. Draw Active Tracks (Faces & Persons)
+        # 2. Draw Highly Filtered Person & Face Tracks
         for pf in faces:
             bbox = pf["bbox"]
             name = pf["name"]
@@ -456,47 +469,56 @@ class Processor:
             label = pf.get("label", "face")
             is_identified = pf.get("is_identified", False)
             
-            # Person tracks use larger, solid boxes. Faces use thinner accent boxes.
+            color_key = f"Threat_{threat[:3].capitalize()}" if threat in ["High", "Medium", "Low"] else "Threat_Low"
+            if threat == "Medium": color_key = "Threat_Med"
+            
+            main_color = COLORS.get(color_key, COLORS["Threat_Low"])
+            
             if label == "person":
-                color_map = {
-                    "High": (83, 83, 255),
-                    "Medium": (0, 140, 255),
-                    "Low": (83, 222, 83)
-                }
-                main_color = color_map.get(threat, (200, 200, 200))
+                # Clean, modern corner brackets for people
+                draw_corners(frame, bbox, main_color, base_thickness, length=20)
                 
-                # Double thickness for identified persons
-                thickness = base_thickness + (1 if is_identified else 0)
-                
-                # Draw main body box
-                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, thickness, cv2.LINE_4)
-                
-                # If identified, add a status indicator
+                # Modern indicator for AI Identification
                 if is_identified:
-                    cv2.circle(frame, (bbox[0] + 15, bbox[1] + 15), 5, main_color, -1)
+                    # Subtle top bar highlight for identified individuals
+                    cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[1]+3), main_color, -1)
+            elif label == "handgun":
+                # SPECIAL ALERT for WEAPON (Flashing Red look)
+                main_color = (0, 0, 255) # Pure Red
+                threat = "DANGER"
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, base_thickness * 2, cv2.LINE_4)
+                draw_corners(frame, bbox, main_color, base_thickness * 2, length=20)
             else:
-                # Face boxes (accents)
-                main_color = (255, 255, 255) if threat == "Low" else (83, 83, 255)
-                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), main_color, 1, cv2.LINE_4)
+                # Face boxes (corners only)
+                draw_corners(frame, bbox, main_color, 1, length=10)
 
-            # Draw Label
-            display_name = f" {name.upper()} " if name != "Unknown" else f" {label.upper()} "
+            # --- Label Drawing Engine ---
+            display_name = name.upper() if name != "Unknown" else label.upper()
+            if is_identified: display_name = f"ID: {display_name}"
+            
             font = cv2.FONT_HERSHEY_DUPLEX
+            (tw, th), baseline = cv2.getTextSize(display_name, font, font_scale * 0.9, text_thickness)
             
-            (tw, th), baseline = cv2.getTextSize(display_name, font, font_scale, text_thickness)
+            lx = int(bbox[0])
+            ly = int(bbox[1]) - 8 if (int(bbox[1]) - 8) > th else int(bbox[1]) + th + 10
             
-            lx = bbox[0]
-            ly = bbox[1] - base_thickness - 5
-            if ly < th + 5:
-                ly = bbox[1] + th + base_thickness + 5
+            # Clamp to frame edges
+            lx = max(0, min(lx, w - tw - 10))
             
-            if lx + tw > w: lx = w - tw
-            lx = max(0, lx)
-
-            # Draw Label Background and Text
-            cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), (10, 8, 5), -1)
-            cv2.rectangle(frame, (lx, ly - th - 3), (lx + tw, ly + 3), main_color, 1, cv2.LINE_4)
-            cv2.putText(frame, display_name, (lx, ly), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_4)
+            # Premium Tag look
+            cv2.rectangle(frame, (lx, ly - th - 6), (lx + tw + 10, ly + 6), COLORS["Overlay_BG"], -1)
+            cv2.rectangle(frame, (lx, ly - th - 6), (lx + tw + 10, ly + 6), main_color, 1) # Thin border
+            
+            # Text fill
+            cv2.putText(frame, display_name, (lx + 5, ly), font, font_scale * 0.9, (255, 255, 255), text_thickness, cv2.LINE_AA)
+            
+            # Threat Level Sub-text (if identified or high threat)
+            if threat != "Low" or is_identified:
+                sub_txt = threat.upper()
+                (stw, sth), _ = cv2.getTextSize(sub_txt, font, font_scale * 0.6, text_thickness)
+                cv2.rectangle(frame, (lx, ly + 6), (lx + stw + 10, ly + sth + 12), COLORS["Overlay_BG"], -1)
+                cv2.rectangle(frame, (lx, ly + 6), (lx + stw + 10, ly + sth + 12), main_color, 1)
+                cv2.putText(frame, sub_txt, (lx + 5, ly + sth + 8), font, font_scale * 0.6, main_color, text_thickness, cv2.LINE_AA)
 
     def _encode_frame(self, frame: np.ndarray) -> Optional[bytes]:
         from config import VIDEO_JPEG_QUALITY

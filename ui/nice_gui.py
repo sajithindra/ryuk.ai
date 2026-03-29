@@ -148,6 +148,11 @@ class NiceDashboard:
                                         ui.label("THRESHOLDS").classes('text-[10px] font-bold opacity-30')
                                         ui.slider(min=0.5, max=0.99, value=0.85, step=0.01).props('dark label-always label-value="{value}"').classes('w-48')
                                         ui.label("Confidence Floor").classes('text-[10px] opacity-50')
+                                    with ui.column().classes('gap-2'):
+                                        ui.label("DISPLAY").classes('text-[10px] font-bold opacity-30')
+                                        ui.switch('HIGH PERFORMANCE (30 FPS)', 
+                                                  on_change=lambda e: self._toggle_performance_mode(e.value)).props('dark')
+                                        ui.label("Uses more CPU/Bandwidth").classes('text-[10px] opacity-50')
                         
                         self.system_view = SystemView(SERVER_PORT, self.ip_address)
 
@@ -813,6 +818,13 @@ class NiceDashboard:
         except Exception as e:
             ui.notify(f"Link failed: {e}", type='negative')
             logger.error(f"Link Error: {e}")
+            
+    def _toggle_performance_mode(self, enabled: bool):
+        """Set performance mode for all active stream processors."""
+        for proc in active_sessions.values():
+            proc.performance_mode = enabled
+        ui.notify(f"Dashboard Mode: {'PERFORMANCE' if enabled else 'ECONOMY'}", 
+                  type='info', icon='speed' if enabled else 'eco')
 
     def _on_fullscreen(self, client_id: str):
         with ui.dialog().classes('w-full h-full') as dialog:
@@ -973,23 +985,36 @@ async def stream_endpoint(client_id: str):
         last_frame_time = time.time()
         try:
             while not app.is_stopping:
-                await asyncio.sleep(0.2) # ~5fps (Optimized per user request)
+                proc = active_sessions.get(client_id)
+                if not proc: break
+                
+                # Dynamic FPS Control
+                if not proc.performance_mode:
+                    await asyncio.sleep(0.2) # ~5fps (Bandwidth Saver)
+                else:
+                    # High Performance: Wait for next available frame from Processor thread
+                    # We use a small sleep or a blocking wait in a thread
+                    def wait_for_frame():
+                        with proc.frame_ready:
+                            return proc.frame_ready.wait(timeout=0.1) # 100ms timeout max
+                            
+                    await asyncio.to_thread(wait_for_frame)
+                
                 if client_id not in active_sessions: break
                 
-                frame = active_sessions[client_id].latest_processed_frame
+                frame = proc.latest_processed_frame
                 if frame:
                     last_frame_time = time.time()
                     yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                 elif time.time() - last_frame_time > 1.0:
                     # Yield a 'CONNECTING' or 'LAG' frame to keep generator alive 
-                    # and signal to user that we are waiting for the processor.
                     import cv2
                     import numpy as np
                     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-                    cv2.putText(placeholder, "CONNECTING...", (100, 240), cv2.FONT_HERSHEY_DUPLEX, 1.5, (0, 140, 255), 2)
+                    cv2.putText(placeholder, "WAITING...", (100, 240), cv2.FONT_HERSHEY_DUPLEX, 1.5, (0, 140, 255), 2)
                     _, buffer = cv2.imencode('.jpg', placeholder, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
                     yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                    last_frame_time = time.time() # Reset to avoid spamming
+                    last_frame_time = time.time()
         except asyncio.CancelledError:
             pass # Graceful exit on disconnect or shutdown
         except Exception as e:
